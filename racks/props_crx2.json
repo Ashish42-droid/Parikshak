@@ -1,0 +1,17 @@
+{
+  "_note": "Fiducial-marked props for a live CRX-2 run. The same tag IDs as racks/props_csp1.json for the entities the two procedures share, so one printed set serves both - swapping procedures is a file change, not a re-print.",
+  "family": "tag36h11",
+  "tag_size_m": 0.06,
+  "tags": {
+    "202": {"entity": "vial_a"},
+    "203": {"entity": "vial_b"},
+    "211": {"entity": "latch", "state": "closed"},
+    "212": {"entity": "latch", "state": "open"},
+    "231": {"entity": "process_unit", "state": "idle"},
+    "232": {"entity": "process_unit", "state": "running"},
+    "233": {"entity": "process_unit", "state": "complete"},
+    "234": {"entity": "process_unit", "state": "fault"},
+    "261": {"entity": "locker_l1"},
+    "271": {"entity": "restraint"}
+  }
+}

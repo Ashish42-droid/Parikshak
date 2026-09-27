@@ -1,0 +1,787 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>PARIKSHAK - project documentation</title><style>
+body { font-family: Calibri, 'Segoe UI', Arial, sans-serif; font-size: 11pt; color: #15202B;
+       line-height: 1.45; max-width: 46em; margin: 2em auto; }
+h1 { font-family: Arial, sans-serif; font-size: 24pt; color: #0B1D33; margin: 0 0 .2em; }
+h2 { font-family: Arial, sans-serif; font-size: 16pt; color: #0B1D33; margin: 1.6em 0 .4em;
+     page-break-after: avoid; }
+h3 { font-family: Arial, sans-serif; font-size: 12.5pt; color: #2D5BD8; margin: 1.2em 0 .3em;
+     page-break-after: avoid; }
+p { margin: .45em 0; }
+table { border-collapse: collapse; width: 100%; margin: .7em 0 1em; font-size: 10pt;
+        page-break-inside: avoid; }
+th { background: #0B1D33; color: #FFFFFF; text-align: left; padding: 5px 7px; }
+td { border: 1px solid #D3DAE1; padding: 5px 7px; vertical-align: top; }
+tr:nth-child(even) td { background: #EEF2F6; }
+code { font-family: Consolas, 'Courier New', monospace; font-size: 9.5pt; background: #EEF2F6;
+       padding: 0 2px; }
+pre { font-family: Consolas, 'Courier New', monospace; font-size: 9pt; background: #EEF2F6;
+      border: 1px solid #D3DAE1; padding: 8px 10px; white-space: pre-wrap; }
+pre code { background: none; padding: 0; }
+a { color: #2D5BD8; text-decoration: none; }
+hr { border: 0; border-top: 1px solid #D3DAE1; margin: 1.4em 0; }
+blockquote { border-left: 3px solid #2D5BD8; margin: .8em 0; padding: .1em .9em; color: #4A5866; }
+</style></head><body><h1>PARIKSHAK — project documentation</h1>
+<p><strong>On-board procedure witness for crewed space missions</strong></p>
+<p>Smart India Hackathon 2026 · Problem Statement <strong>26174</strong> · Space Technology · Software
+Problem statement: <em>AI-based Human Activity Recognition for validating scientific
+experiment sequences on-board (BAS / lunar missions)</em> — Indian Space Research
+Organisation (ISRO), Department of Space.</p>
+<p>Status of this document: 22 September 2026. Every number in it is read from a
+file in <code>runs/</code>, named where it is quoted, and can be regenerated with the
+commands in section 14.</p>
+<hr />
+<h2>Contents</h2>
+<ol>
+<li><a href="#1-summary">Summary</a></li>
+<li><a href="#2-the-problem">The problem</a></li>
+<li><a href="#3-what-parikshak-does">What PARIKSHAK does</a></li>
+<li><a href="#4-architecture">Architecture</a></li>
+<li><a href="#5-core-concepts">Core concepts</a></li>
+<li><a href="#6-the-two-experiments">The two experiments</a></li>
+<li><a href="#7-software-components">Software components</a></li>
+<li><a href="#8-running-it">Running it</a></li>
+<li><a href="#9-adding-a-new-experiment">Adding a new experiment</a></li>
+<li><a href="#10-how-it-is-evaluated">How it is evaluated</a></li>
+<li><a href="#11-results">Results</a></li>
+<li><a href="#12-performance-and-endurance">Performance and endurance</a></li>
+<li><a href="#13-testing-and-quality-gates">Testing and quality gates</a></li>
+<li><a href="#14-deliverables-and-how-to-regenerate-them">Deliverables and how to regenerate them</a></li>
+<li><a href="#15-honest-limits">Honest limits</a></li>
+<li><a href="#16-road-to-a-flight-system">Road to a flight system</a></li>
+<li><a href="#17-licences">Licences</a></li>
+<li><a href="#18-glossary">Glossary</a></li>
+</ol>
+<hr />
+<h2>1. Summary</h2>
+<p>An astronaut runs a science procedure on the space station. PARIKSHAK watches
+the experiment rack through a camera, checks every step against the procedure
+file, speaks the next step, and raises an alert only when the evidence is strong
+— always naming the step and the reason. When the camera cannot see, it says
+&quot;cannot verify&quot; instead of guessing. Every run writes a small, tamper-evident
+flight record that is sent to the ground before any video.</p>
+<p>What exists today is a working software prototype:</p>
+<ul>
+<li>a procedure engine that verifies steps, detects skipped steps, wrong objects,
+timing violations and safety hazards, and explains every decision;</li>
+<li>two experiments written as files — CSP-1 (14 steps) and CRX-2 (8 steps) — the
+second added with no retraining and no code change;</li>
+<li>a browser app in which you choose an experiment and are guided through it
+while the engine judges each step live, plus replays of 14 recorded runs;</li>
+<li>a desktop operator window, a live webcam mode using printed markers, voice
+prompts, video clips around alerts, and a hash-chained log with a verifier;</li>
+<li>an evaluation on 200 degraded runs, a laptop CPU benchmark and a 45-minute
+endurance test, all reproducible.</li>
+</ul>
+<p>Measured on the degraded evaluation corpus, <strong>every target is met on both
+experiments</strong>:</p>
+<table>
+<thead>
+<tr>
+<th>Measure</th>
+<th>Target</th>
+<th>CSP-1 (130 runs)</th>
+<th>CRX-2 (70 runs)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Step accuracy</td>
+<td>≥ 95 %</td>
+<td>98.7 %</td>
+<td>95.6 %</td>
+</tr>
+<tr>
+<td>Deviations caught</td>
+<td>≥ 90 %</td>
+<td>97.8 %</td>
+<td>97.5 %</td>
+</tr>
+<tr>
+<td>False alarms per 45 min</td>
+<td>≤ 1</td>
+<td>0.85</td>
+<td>0.00</td>
+</tr>
+<tr>
+<td>False alarms on permitted reorders</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+</tr>
+<tr>
+<td>Alert delay, median / 95th percentile</td>
+<td>≤ 2 s</td>
+<td>1.6 / 1.6 s</td>
+<td>1.6 / 1.8 s</td>
+</tr>
+</tbody>
+</table>
+<p>Sources: <code>runs/eval.json</code>, <code>runs/eval_crx2.json</code>.</p>
+<h2>2. The problem</h2>
+<p><strong>Who it is for.</strong> The crew member at the rack — hands busy, eyes on the work,
+no keyboard — and the ground principal investigator who reads the record weeks
+later and must decide whether the run is valid.</p>
+<p><strong>Why the ground cannot do it.</strong> A round trip to the Moon takes about 2.6 s and
+to Mars 6 to 44 minutes. Ground control cannot watch a step as it happens, and
+on the Bharatiya Antariksh Station (BAS) or a lunar mission the link will not
+carry continuous video of every experiment. The witness has to be on board.</p>
+<p><strong>Why a checklist is not enough.</strong> Today the crew ticks each step on a tablet.
+That costs exactly the attention the procedure needs, and self-reporting cannot
+catch a mistake the crew did not notice: a latch left open, the wrong vial
+picked from two that look alike, a hazard that skips no step at all.</p>
+<p><strong>The hidden requirement.</strong> An assistant that raises false alarms is switched
+off. The design therefore treats a false accusation as the most expensive error:
+missing evidence must never become an alarm, and every alarm must be defensible
+afterwards.</p>
+<h2>3. What PARIKSHAK does</h2>
+<table>
+<thead>
+<tr>
+<th>It…</th>
+<th>How</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Guides the crew</td>
+<td>Speaks each step's prompt as it becomes current; shows a live checklist</td>
+</tr>
+<tr>
+<td>Verifies each step independently</td>
+<td>Evaluates the step's conditions against what the camera sees, over time</td>
+</tr>
+<tr>
+<td>Catches skipped steps</td>
+<td>Notices a later step completing while this one never did, with evidence against it</td>
+</tr>
+<tr>
+<td>Catches the wrong object</td>
+<td>Watches for the confusable object the procedure itself declares (vial A vs vial B)</td>
+</tr>
+<tr>
+<td>Catches hazards</td>
+<td>Safety rules that must hold throughout a step, such as &quot;latch closed while the unit runs&quot;</td>
+</tr>
+<tr>
+<td>Catches timing problems</td>
+<td>A step done faster than physically plausible, or far slower than its limit</td>
+</tr>
+<tr>
+<td>Handles hardware faults</td>
+<td>Follows the procedure's fault branch instead of blaming the crew</td>
+</tr>
+<tr>
+<td>Admits blindness</td>
+<td>Reports &quot;cannot verify&quot; when the view is blocked or the rack is lost — never &quot;skipped&quot;</td>
+</tr>
+<tr>
+<td>Explains itself</td>
+<td>Every alert carries the condition that failed and when</td>
+</tr>
+<tr>
+<td>Keeps a flight record</td>
+<td>A SHA-256 hash-chained log of every decision; editing one byte is detected</td>
+</tr>
+<tr>
+<td>Records evidence</td>
+<td>A ±10 s video clip around each alert (live runs)</td>
+</tr>
+<tr>
+<td>Runs offline</td>
+<td>No module in the on-board software can open a network connection</td>
+</tr>
+</tbody>
+</table>
+<h2>4. Architecture</h2>
+<pre><code> Camera ──► Perception ──► Belief frame ──► Procedure engine ──► Crew and ground
+ (rack)     rack pose from   what is seen,    predicates,          voice prompt,
+            AprilTags;       with confidence; evidence over time,  alert with reason,
+            objects, states, hidden stays     duration priors,     checklist,
+            hands            &quot;unknown&quot;        safety invariants    hash-chained log
+</code></pre>
+<p>The pipeline has one hard seam: the <strong>belief frame</strong>. Everything to its left is
+perception and may be replaced — printed markers today, trained detectors on a
+flight build. Everything to its right is the reasoning engine and never sees a
+pixel. A recorded run is simply a file of belief frames, so the engine can be
+replayed deterministically from any recording, and the evaluation, the demo and
+the tests all drive the same engine the live system uses.</p>
+<p>Per frame, the data flow is:</p>
+<ol>
+<li>The camera image goes to perception, which locks the rack frame from four
+AprilTags (camera pose by PnP) and reports each declared object's position in
+rack coordinates, its state (latch open/closed, unit idle/running) and any
+hands.</li>
+<li>Perception emits a <code>BeliefFrame</code>: per object, visible / occluded / position /
+state / confidence; plus hands, motion class and crew confirmations.</li>
+<li>The step tracker evaluates every step's verification tree, accumulates
+evidence for and against each step, and resolves steps as complete, skipped
+or unverified.</li>
+<li>The deviation detector turns those transitions into typed deviations; the
+alert policy decides, with persistence and severity, what is said to the crew.</li>
+<li>The run logger appends each decision to the hash-chained record; the display
+state is rebuilt from the engine for the screen.</li>
+</ol>
+<h2>5. Core concepts</h2>
+<h3>5.1 The procedure is a file</h3>
+<p>An experiment is written in the procedure language (PDL, YAML validated by a
+JSON Schema in <code>schema/</code>). It declares the zones of the rack, the entities and
+their states, each step with its prompt, objects, verification condition,
+duration prior and optional safety invariants, unordered groups of steps,
+branches, and the alert policy. The perception layer learns hands and objects;
+it never learns an experiment. A new experiment is therefore a new file.</p>
+<h3>5.2 Three-valued truth — unknown is not wrong</h3>
+<p>Every condition evaluates to an interval <code>[lo, hi]</code> rather than a yes/no: <code>TRUE</code>
+is <code>[1, 1]</code>, <code>FALSE</code> is <code>[0, 0]</code>, and <code>UNKNOWN</code> is <code>[0, 1]</code>. An occluded object
+is unknown, not absent; a condition that needs a model the setup lacks (hand
+tracking, a motion classifier) is unknown, not false; geometry without a rack
+lock is unknown. Only positive evidence against a step can make it &quot;skipped&quot;.
+Losing information may move a verdict toward &quot;cannot verify&quot;, never toward an
+accusation.</p>
+<h3>5.3 Predicates</h3>
+<p>The closed vocabulary of conditions includes <code>visible</code>, <code>absent</code>, <code>count_of</code>,
+<code>inside</code>, <code>near</code>, <code>aligned</code>, <code>contacting</code>, <code>stable</code>, <code>released</code>, <code>grasped</code>,
+<code>hand_in_zone</code>, <code>state_is</code>, <code>motion_is</code>, <code>motion_count</code>, <code>crew_confirmed</code> and
+<code>assert_true</code>, combined with <code>all</code>, <code>any</code>, <code>not</code>, <code>hold_for</code> (held across a
+window, tolerating a share of disagreeing frames) and <code>occurred</code> (happened at
+some moment during the step). The authoritative definitions, with the
+capability each needs, are in <code>schema/PREDICATES.md</code>; a test keeps that document
+in step with the code.</p>
+<h3>5.4 Evidence over time</h3>
+<p>A step is not judged on one frame. Each step keeps two one-sided accumulators
+(CUSUM-style): support that it is done and evidence that it is not, updated at
+the procedure's evidence rate (2 independent observations per second). A step
+completes when support passes the completion bar (0.85); it can be called
+skipped only when evidence against it passes the deviation bar (0.85) <strong>and</strong> it
+was seen undone recently — within its own minimum duration. Duration priors
+(minimum, nominal, maximum per step) make &quot;skipped&quot; a judgement about time, not
+a timeout.</p>
+<h3>5.5 Deviations and alerts</h3>
+<table>
+<thead>
+<tr>
+<th>Kind</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>SKIP</code></td>
+<td>A later step completed while this one had evidence against it</td>
+</tr>
+<tr>
+<td><code>OUT_OF_ORDER</code></td>
+<td>A step reported skipped was later completed</td>
+</tr>
+<tr>
+<td><code>WRONG_OBJECT</code></td>
+<td>The declared confusable object was held in this step</td>
+</tr>
+<tr>
+<td><code>HAZARD</code></td>
+<td>A safety invariant was violated during a step</td>
+</tr>
+<tr>
+<td><code>DURATION</code></td>
+<td>Completed below its minimum or above its maximum duration</td>
+</tr>
+<tr>
+<td><code>REPEAT</code></td>
+<td>A completed step was performed again</td>
+</tr>
+</tbody>
+</table>
+<p>The alert policy maps each to a severity tier — info (screen), advisory
+(screen + chime), caution (screen + chime + voice), critical — and requires the
+deviation to persist for 1.5 s before speaking. Every alert carries the spoken
+text and the machine reason: for example <em>&quot;Step eight, close the glovebox latch,
+was not completed&quot;</em> with <em>&quot;predicate state_is(latch, closed) never satisfied
+between 43.0 s and 46.2 s&quot;</em>.</p>
+<h3>5.6 Orientation-agnostic geometry</h3>
+<p>AprilTag fiducials are bonded to the rack face, and every position is expressed
+in the rack's own frame. Up is the rack, not gravity: rotating the rack, the
+camera or the crew member changes none of the numbers the engine reasons with.</p>
+<h3>5.7 The flight record</h3>
+<p>Each run writes a JSON-lines log in which every record carries the SHA-256 of
+the previous one (<code>tools/verify_log.py</code> recomputes the chain and names the first
+altered record), plus a human-readable mirror. The record names the procedure's
+hash and the operating point. A 140.8 s run's log is 8,275 bytes against about
+70.4 MB of video — the log is downlinked first (<code>runs/downlink_sample/</code>).</p>
+<h3>5.8 Offline by construction</h3>
+<p><code>tests/test_offline.py</code> reads the source of every module under <code>parikshak/</code> and
+fails the build if any imports a module capable of opening a network
+connection. The browser demo is a ground-side presentation tool and lives
+outside the on-board package (<code>demo/</code>) for exactly that reason.</p>
+<h2>6. The two experiments</h2>
+<p><strong>CSP-1 — Colloidal Suspension Sample Processing</strong> (14 steps,
+<code>procedures/csp1_colloid_sample_processing.yaml</code>): secure in the foot restraint;
+retrieve cartridge SC-A and vial A (an unordered pair); verify the cartridge
+label; open the glovebox latch; insert the cartridge into holder H1; attach vial
+A and rotate to seal; close the latch (critical); press START; monitor the
+60-second cycle (with a safety invariant: the latch must stay closed while the
+unit runs, and a fault branch on a red indicator); open the latch; remove the
+cartridge; seal it in sample bag SB-01 (critical); stow the bag in cold locker
+L1 (critical).</p>
+<p><strong>CRX-2 — Colloid resuspension</strong> (8 steps,
+<code>procedures/crx2_colloid_resuspension.yaml</code>): secure in the restraint; retrieve
+vial B from cold locker L1; confirm the processing unit is idle; resuspend vial
+B by agitation (ten counted motions, with a geometric safety rule — not within
+12 cm of the powered unit); place it in tray T1 to settle; confirm the
+suspension is uniform; return vial B to the cold locker (critical); confirm the
+run is complete.</p>
+<p>CRX-2 uses the same rack, the same object classes and the same software; it was
+added as a file and verified against the perception build with
+<code>tools/onboard.py</code> — zero retraining.</p>
+<h2>7. Software components</h2>
+<table>
+<thead>
+<tr>
+<th>Path</th>
+<th>What it holds</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>parikshak/belief/</code></td>
+<td><code>BeliefFrame</code> (the contract between perception and reasoning) and trace I/O, including a streaming trace writer</td>
+</tr>
+<tr>
+<td><code>parikshak/pdl/</code></td>
+<td>Procedure loader, validator and command-line checker</td>
+</tr>
+<tr>
+<td><code>parikshak/engine/</code></td>
+<td>Three-valued truth, predicates, evidence accumulation, step tracker (<code>hsmm.py</code>), deviation detector, alert policy, run logger, <code>ProcedureEngine</code></td>
+</tr>
+<tr>
+<td><code>parikshak/perception/</code></td>
+<td>Rack frame from AprilTags (PnP), marker-based objects and states, detector back-ends, the perception pipeline</td>
+</tr>
+<tr>
+<td><code>parikshak/io/</code></td>
+<td>Cameras (OpenCV, synthetic), GStreamer capture graph, speech queue and voices, voice-command grammar, alert clips (ffmpeg path and in-memory OpenCV path), downlink packaging</td>
+</tr>
+<tr>
+<td><code>parikshak/gui/</code></td>
+<td>Desktop operator window, display state, camera overlay</td>
+</tr>
+<tr>
+<td><code>parikshak/eval/</code></td>
+<td>World-model simulator, the two experiments' scripts, the degraded corpus, perturbation profiles, the evaluation harness, renderers</td>
+</tr>
+<tr>
+<td><code>parikshak/live.py</code>, <code>run.py</code>, <code>replay.py</code></td>
+<td>Live session, the <code>parikshak run</code> command, the replay command</td>
+</tr>
+<tr>
+<td><code>demo/</code></td>
+<td>Browser app: guided runs (<code>guided.py</code>), recorded scenarios (<code>scenarios.py</code>), web server (<code>server.py</code>), the page</td>
+</tr>
+<tr>
+<td><code>procedures/</code>, <code>racks/</code>, <code>schema/</code>, <code>builds/</code></td>
+<td>Experiments, rack and prop marker layouts, the procedure schema and predicate contract, the perception build</td>
+</tr>
+<tr>
+<td><code>traces/</code></td>
+<td>Golden runs (9 CSP-1, 7 CRX-2) and the degraded evaluation corpus (130 + 70)</td>
+</tr>
+<tr>
+<td><code>tools/</code></td>
+<td>Checks, evaluation and ROC sweep, benchmark, endurance test, power report, reel, tag sheets, downlink sample, demo page, the deck</td>
+</tr>
+<tr>
+<td><code>deploy/jetson/</code></td>
+<td>Edge bring-up package — written, not yet run on hardware</td>
+</tr>
+<tr>
+<td><code>tests/</code></td>
+<td>602 automated tests</td>
+</tr>
+</tbody>
+</table>
+<h2>8. Running it</h2>
+<p><strong>Install</strong> (Python 3.12 or newer):</p>
+<pre><code class="language-bash">pip install -e &quot;.[web,gui,dev]&quot; opencv-contrib-python pyttsx3
+</code></pre>
+<p>The engine alone needs only NumPy, PyYAML and jsonschema.</p>
+<p><strong>The browser app</strong> — the fastest way to see everything:</p>
+<pre><code class="language-bash">python -m demo
+</code></pre>
+<ul>
+<li><em>Perform an experiment</em>: choose CSP-1 or CRX-2. At each step choose what the
+crew does — do the step, skip it, take the wrong item, open the glovebox while
+the unit runs, work with the camera blocked, or wait. The simulated rack
+responds and the real engine judges it; at the end you get the summary and the
+verified record.</li>
+<li><em>Watch a recorded run</em>: 14 runs replayed with playback, timeline and record.</li>
+<li><em>How it works</em> and <em>Results &amp; limits</em>.</li>
+</ul>
+<p><code>python tools/make_demo_page.py</code> writes <code>runs/demo/parikshak_demo.html</code>, a single
+file with every recorded run embedded that opens offline by double-click.</p>
+<p><strong>Other modes:</strong></p>
+<table>
+<thead>
+<tr>
+<th>What</th>
+<th>Command</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Desktop window replaying a run</td>
+<td><code>python -m parikshak.replay traces/golden/skip_S08_latch.jsonl --window</code></td>
+</tr>
+<tr>
+<td>Terminal replay, spoken</td>
+<td><code>python -m parikshak.replay traces/golden/skip_S08_latch.jsonl --speak</code></td>
+</tr>
+<tr>
+<td>Live run on a rendered camera</td>
+<td><code>python -m parikshak.run --camera synthetic --procedure procedures/crx2_colloid_resuspension.yaml --props racks/props_crx2.json</code></td>
+</tr>
+<tr>
+<td>Live run on a webcam</td>
+<td>print <code>runs/tags/tags.pdf</code> at 100 %, then the same with <code>--camera 0</code></td>
+</tr>
+<tr>
+<td>Verify a run log</td>
+<td><code>python tools/verify_log.py runs/live/&lt;run&gt;.log.jsonl</code></td>
+</tr>
+</tbody>
+</table>
+<p>A live run writes its log, its trace and a ±10 s clip around each alert into
+<code>runs/live/</code>.</p>
+<h2>9. Adding a new experiment</h2>
+<ol>
+<li>Copy <code>procedures/_template.yaml</code> and describe the zones, entities (with
+<code>confusable_with</code> where two objects can be mistaken), steps, verification
+conditions, duration priors, invariants and alert policy.</li>
+<li>Validate: <code>python tools/validate_procedure.py procedures/&lt;new&gt;.yaml</code>. The
+validator checks the schema, predicate arguments, the step graph, duration
+sums and capability requirements, and prints the duration priors.</li>
+<li>Check it needs no retraining: <code>python tools/onboard.py procedures/&lt;new&gt;.yaml</code>
+confirms every object class it uses is in the perception build.</li>
+<li>Optionally script its steps in the simulator to generate golden runs and a
+degraded corpus, and evaluate with <code>tools/eval_report.py</code>.</li>
+</ol>
+<p>No engine, perception or interface code changes.</p>
+<h2>10. How it is evaluated</h2>
+<p><strong>Corpus.</strong> Runs are generated by the world-model simulator and then degraded
+with four profiles — clean, mild, moderate, harsh — that scale and jitter
+detector confidence, add position noise (up to 1.5 cm per axis), drop frames and
+occlude the workspace. Each deviation run carries the error injected into it
+(skip, wrong object, hazard, rush, stall), and each run carries its expected
+outcome. CSP-1: 130 runs, 346.6 minutes; CRX-2: 70 runs, 58.7 minutes.</p>
+<p><strong>Honest scoring.</strong> An alarm counts as false if nothing was injected in the run,
+or if it concerns a step before the injected one — which the injection cannot
+have caused. The false-alarm rate is normalised by the time in which an alarm
+could only be false. Alarms about steps after an injected error that genuinely
+cannot be verified are counted separately as cascades.</p>
+<p><strong>Operating point.</strong> A sweep over completion and deviation thresholds
+(<code>runs/roc_csp1.txt</code>, <code>runs/roc_crx2.txt</code>) confirms 0.85 / 0.85 with 1.5 s
+persistence: lower completion bars raise CSP-1 false alarms to 8–11 per 45
+minutes and produce alarms on permitted reorders.</p>
+<h2>11. Results</h2>
+<h3>11.1 Headline</h3>
+<p>See the table in section 1. By deviation type, CSP-1 catches 100 % of skips,
+hazards and wrong objects and 90 % of timing deviations; CRX-2 catches 100 % of
+hazards and wrong objects and 95 % of skips. Both experiments raise <strong>zero</strong>
+false alarms on correct runs, permitted reorders and runs with the camera
+blocked or the rack markers lost. Steps that could not be verified: 3.9 %
+(CSP-1) and 7.3 % (CRX-2).</p>
+<h3>11.2 How the false-alarm target was reached</h3>
+<p>CSP-1 started at 2.98 false alarms per 45 minutes under honest scoring. Each
+cause was found by replaying the failing run frame by frame, fixed test-first,
+and re-measured on the whole corpus; the pinned tests are in
+<code>tests/test_false_alarms.py</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Cause</th>
+<th>Mechanism</th>
+<th>Fix</th>
+<th>Removed</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A. Latched evidence thrown away</td>
+<td>A momentary action seen before the engine reached its step (the engine was behind the crew) was wiped when the previous step was entered</td>
+<td>Trim <code>occurred</code> evidence to the window in which the step could have begun, instead of clearing it</td>
+<td>4 false skips (S06)</td>
+</tr>
+<tr>
+<td>B. One noisy frame moved a step's start</td>
+<td>A single contrary frame counted as &quot;seen still undone&quot;, making the next step look rushed</td>
+<td>&quot;Seen undone&quot; needs contrary readings unbroken for one independent observation</td>
+<td>1 false &quot;too fast&quot;</td>
+</tr>
+<tr>
+<td>C. Jitter read as movement</td>
+<td>Under heavy noise two halves of a still object's window differ by more than the 3 cm tolerance by chance</td>
+<td>Movement is proven only when drift exceeds the tolerance by two standard errors of the window's own jitter; otherwise &quot;cannot tell&quot;</td>
+<td>5 false alarms (1 skip, 4 timing)</td>
+</tr>
+</tbody>
+</table>
+<p>2.98 → 1.92 → <strong>0.85</strong> per 45 minutes (14 → 9 → 4 false alarms), with step
+accuracy and deviation recall unchanged at every stage.</p>
+<p>One further idea was tried and <strong>rejected</strong>: a uniform timing margin cleared a
+&quot;4.8 s against a 5 s minimum&quot; alarm but also silenced a genuinely rushed step on
+a clean run, because both measure equally close to their minimum. The guard test
+caught it and it was reverted.</p>
+<h3>11.3 What still goes wrong</h3>
+<p>The failure-mode reel (<code>runs/reel/reel.mp4</code>, segments in <code>docs/reel/segments.json</code>)
+shows each with its cause:</p>
+<ul>
+<li><strong>4 false skips on CSP-1 S07</strong>, all under moderate or harsh degradation. The
+vial is genuinely moving while it is carried onto the cartridge, which counts
+against the step; the crew then closes the latch 4.8 s later, 0.2 s inside
+S07's 5 s minimum. Moving that line would be the same blanket margin that
+failed above.</li>
+<li><strong>2 missed rushed steps (S12)</strong>, both under harsh degradation. A blind spot
+just before the rush leaves the generous reading of its duration at exactly
+the minimum, so it is not called too fast.</li>
+<li><strong>Correct steps that read &quot;cannot verify&quot;</strong> on CRX-2 when an occlusion hides
+the vial right after it is put down — no false alarm, but no confirmation.</li>
+</ul>
+<h2>12. Performance and endurance</h2>
+<p>On a laptop CPU (Intel Core 11th gen, 8 threads) at 1280×720, the full live loop
+— tag detection, rack pose, marker objects, the engine, the display and the
+overlay — takes 34.6 ms per frame at the median and 74.8 ms at the 95th
+percentile: <strong>28.9 FPS typical, 13.4 FPS in the slowest 5 % of frames</strong>, against a
+target of 10 (<code>runs/bench.json</code>). The engine alone takes about 1.2 ms per frame.</p>
+<p>A 45-minute simulated session (<code>tools/soak.py --stream</code>) keeps every temporal
+history bounded, grows memory by 7.4 MB per hour while recording its trace to
+disk (<code>TraceWriter</code>, byte-identical to the buffered writer), and slows by 1.35×
+from the first to the last third (limit 1.5×) (<code>runs/soak_stream.json</code>). Latency
+on the test laptop varied up to 3× between runs on identical code because of CPU
+frequency on battery; comparisons are made within one run or one process.</p>
+<p>Power has <strong>not</strong> been measured: the ≤ 25 W target needs a Jetson and a meter.
+<code>tools/power_report.py</code> and <code>deploy/jetson/</code> are ready for that measurement.</p>
+<h2>13. Testing and quality gates</h2>
+<p><code>python tools/check.py</code> runs every gate and must print <strong>ALL GATES GREEN</strong>:
+validation of both procedures against the perception build, the zero-retraining
+check, the validator's negative suite, the JSON schema, the full test suite
+(602 tests), replay of both golden corpora against their expectations, the
+evaluation report on the golden runs, and the operator display and voice.</p>
+<p>Selected test files:</p>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Holds</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>test_offline.py</code></td>
+<td>No network capability anywhere in the on-board package</td>
+</tr>
+<tr>
+<td><code>test_false_alarms.py</code></td>
+<td>The three fixed false-alarm causes, the guards that keep real detections, and the known limitations as strict expected failures</td>
+</tr>
+<tr>
+<td><code>test_session_window.py</code></td>
+<td>A replay and a live run look identical in the operator window</td>
+</tr>
+<tr>
+<td><code>test_guided.py</code>, <code>test_web.py</code></td>
+<td>The guided runs and the browser app, end to end</td>
+</tr>
+<tr>
+<td><code>test_trace_writer.py</code>, <code>test_clipbuffer.py</code></td>
+<td>Streaming traces are byte-identical; alert clips cover their window or say why not</td>
+</tr>
+<tr>
+<td><code>test_second_procedure.py</code></td>
+<td>CRX-2 runs with no procedure-specific code anywhere</td>
+</tr>
+</tbody>
+</table>
+<h2>14. Deliverables and how to regenerate them</h2>
+<table>
+<thead>
+<tr>
+<th>Deliverable</th>
+<th>File</th>
+<th>Regenerate</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Browser app</td>
+<td><code>demo/</code></td>
+<td><code>python -m demo</code></td>
+</tr>
+<tr>
+<td>Shareable demo page</td>
+<td><code>runs/demo/parikshak_demo.html</code></td>
+<td><code>python tools/make_demo_page.py</code></td>
+</tr>
+<tr>
+<td>SIH idea-submission deck</td>
+<td><code>docs/PARIKSHAK_SIH_Idea_Submission.pptx</code> and <code>.pdf</code></td>
+<td><code>python tools/make_deck.py --render runs/deck/slides</code></td>
+</tr>
+<tr>
+<td>Evaluation</td>
+<td><code>runs/eval.json</code>, <code>runs/eval_crx2.json</code></td>
+<td><code>python tools/eval_report.py --json runs/eval.json</code> (and <code>--traces traces/eval_crx2 --procedure procedures/crx2_colloid_resuspension.yaml --json runs/eval_crx2.json</code>)</td>
+</tr>
+<tr>
+<td>Threshold sweep</td>
+<td><code>runs/roc_csp1.txt</code>, <code>runs/roc_crx2.txt</code></td>
+<td><code>python tools/eval_report.py --sweep</code></td>
+</tr>
+<tr>
+<td>Failure-mode reel</td>
+<td><code>runs/reel/reel.mp4</code></td>
+<td><code>python tools/make_reel.py docs/reel/segments.json</code></td>
+</tr>
+<tr>
+<td>Downlink sample</td>
+<td><code>runs/downlink_sample/</code></td>
+<td><code>python tools/make_downlink_sample.py</code></td>
+</tr>
+<tr>
+<td>Benchmark, endurance</td>
+<td><code>runs/bench.json</code>, <code>runs/soak_stream.json</code></td>
+<td><code>python tools/bench.py</code>, <code>python tools/soak.py --minutes 45 --stream --out runs/soak_stream.json</code></td>
+</tr>
+<tr>
+<td>Printable markers</td>
+<td><code>runs/tags/</code></td>
+<td><code>python tools/make_tag_sheets.py</code></td>
+</tr>
+<tr>
+<td>4-minute demo script</td>
+<td><code>docs/DEMO_SCRIPT.md</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td>Licence statement</td>
+<td><code>docs/LICENCE_STATEMENT.md</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td>Deck content, slide by slide</td>
+<td><code>docs/PITCH_DECK.md</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td>Build plan</td>
+<td><code>PLAN.md</code></td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<h2>15. Honest limits</h2>
+<ul>
+<li><strong>Synthetic data.</strong> The evaluation runs are generated and degraded, not
+recorded in orbit or in a laboratory. Real footage will be harder.</li>
+<li><strong>No trained models yet.</strong> Objects are seen through printed AprilTag markers.
+Without hand tracking, a live webcam run cannot verify steps that need hands
+and waits at the first one — without raising a false alarm.</li>
+<li><strong>Marker precision is measured on rendered frames</strong> (60 mm tags: lateral
+error 9 mm, depth 34 mm at the 95th percentile); a real webcam will be worse.</li>
+<li><strong>Edge hardware.</strong> Speed is measured on a laptop CPU only; the Jetson run and
+the power measurement are not done.</li>
+<li><strong>Streaming video</strong> to a ground laptop needs GStreamer (planned on the
+Jetson); on a laptop the flight record and clips are written to disk instead.</li>
+<li><strong>Voice</strong> uses the system speech engine (pyttsx3); crew commands are typed or
+clicked, as no speech recogniser is installed.</li>
+</ul>
+<h2>16. Road to a flight system</h2>
+<ol>
+<li><strong>Recording campaign</strong> on a mock rack: about 30 correct and 30 error runs,
+several performers and camera poses, with step boundaries captured at record
+time.</li>
+<li><strong>Models</strong>: an object detector (RT-DETR), hand tracking (MediaPipe or
+RTMPose), a contact classifier and a motion model, trained on the campaign,
+MicroG-4M and synthetic renders; evaluated leave-one-performer-out and
+leave-one-camera-pose-out, plus zero-shot on Assembly101.</li>
+<li><strong>Edge</strong>: ONNX → TensorRT INT8 on a Jetson Orin, measured against ≥ 10 FPS at
+≤ 25 W on a power meter (<code>deploy/jetson/README.md</code>).</li>
+<li><strong>Integration</strong>: RTSP to a ground station, Piper voice, spoken commands,
+multi-camera fusion, and a physically rotated-rack test.</li>
+<li><strong>Operations</strong>: cold-boot tests, a spare unit, and rehearsal of the demo
+script.</li>
+</ol>
+<p>The engine, the procedure files and the evaluation harness carry over
+unchanged; only perception is replaced.</p>
+<h2>17. Licences</h2>
+<p>Every runtime library is used under a permissive licence (Apache-2.0, MIT, BSD,
+MPL-2.0) except PySide6 (LGPL-3.0, dynamically linked, desktop window only). No
+dataset and no trained weights ship. Delivered weights will be trained only on
+our own recordings, MicroG-4M (MIT), IndustReal (Apache-2.0) and synthetic
+renders; CC BY-NC datasets are for benchmark reporting only. Details:
+<code>docs/LICENCE_STATEMENT.md</code>.</p>
+<h2>18. Glossary</h2>
+<table>
+<thead>
+<tr>
+<th>Term</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Belief frame</td>
+<td>One frame of what perception believes: objects, states, hands, confidence, occlusion</td>
+</tr>
+<tr>
+<td>Trace</td>
+<td>A file of belief frames — a recorded run that can be replayed</td>
+</tr>
+<tr>
+<td>PDL</td>
+<td>The procedure description language: the experiment as a YAML file</td>
+</tr>
+<tr>
+<td>Predicate</td>
+<td>One condition in a step's verification, such as <code>state_is(latch, closed)</code></td>
+</tr>
+<tr>
+<td>Three-valued truth</td>
+<td>A condition's value as an interval, so &quot;unknown&quot; is distinct from &quot;false&quot;</td>
+</tr>
+<tr>
+<td>Evidence accumulation</td>
+<td>Support and contrary evidence built up over time per step (CUSUM-style)</td>
+</tr>
+<tr>
+<td>Duration prior</td>
+<td>A step's minimum, nominal and maximum time</td>
+</tr>
+<tr>
+<td>Invariant</td>
+<td>A safety condition that must hold throughout a step</td>
+</tr>
+<tr>
+<td>Frontier</td>
+<td>The steps the crew may legally be working on now</td>
+</tr>
+<tr>
+<td>Cascade</td>
+<td>A correct &quot;cannot verify&quot; on steps after an injected error, not charged as a false alarm</td>
+</tr>
+<tr>
+<td>Operating point</td>
+<td>The completion and deviation thresholds and persistence the engine runs at</td>
+</tr>
+<tr>
+<td>Rack frame</td>
+<td>The coordinate frame fixed to the rack by its fiducial markers</td>
+</tr>
+<tr>
+<td>Hash chain</td>
+<td>Each log record carries the hash of the one before, so any edit is detectable</td>
+</tr>
+<tr>
+<td>CFDP</td>
+<td>CCSDS File Delivery Protocol, the downlink transport the package is shaped for</td>
+</tr>
+</tbody>
+</table>
+</body></html>

@@ -1,0 +1,117 @@
+[
+  {
+    "trace": "nominal.jsonl",
+    "expect": {
+      "complete": [
+        "S01",
+        "S02",
+        "S03",
+        "S04",
+        "S05",
+        "S06",
+        "S07",
+        "S08",
+        "S09",
+        "S10",
+        "S11",
+        "S12",
+        "S13",
+        "S14"
+      ]
+    },
+    "notes": "All 14 steps performed correctly and in order.",
+    "frames": 725
+  },
+  {
+    "trace": "legal_reorder_S03_S02.jsonl",
+    "expect": {
+      "complete": [
+        "S01",
+        "S02",
+        "S03",
+        "S04",
+        "S05",
+        "S06",
+        "S07",
+        "S08",
+        "S09",
+        "S10",
+        "S11",
+        "S12",
+        "S13",
+        "S14"
+      ],
+      "no_alert": true
+    },
+    "notes": "Vial retrieved before cartridge. Both are in unordered group G_GATHER, so this is LEGAL and must produce no alert. The false-alarm test.",
+    "frames": 725
+  },
+  {
+    "trace": "skip_S08_latch.jsonl",
+    "expect": {
+      "skipped": [
+        "S08"
+      ]
+    },
+    "notes": "Glovebox latch never closed before START. The primary demo beat.",
+    "frames": 705
+  },
+  {
+    "trace": "skip_S13_seal.jsonl",
+    "expect": {
+      "skipped": [
+        "S13"
+      ]
+    },
+    "notes": "Cartridge stowed without sealing the sample bag. Critical step.",
+    "frames": 695
+  },
+  {
+    "trace": "wrong_object_vial_b.jsonl",
+    "expect": {
+      "wrong_object": [
+        "S03"
+      ]
+    },
+    "notes": "Vial B (orange band) picked instead of vial A (blue). Visually near identical; the error a fatigued crew member actually makes.",
+    "frames": 150
+  },
+  {
+    "trace": "occlusion_S06.jsonl",
+    "expect": {
+      "unverified_at_least": [
+        "S06"
+      ]
+    },
+    "notes": "Crew torso blocks the workspace during insertion. Must report UNVERIFIED, never SKIPPED. An occluded camera must not manufacture a deviation.",
+    "frames": 725
+  },
+  {
+    "trace": "frame_loss_S07.jsonl",
+    "expect": {
+      "unverified_at_least": [
+        "S07"
+      ]
+    },
+    "notes": "AprilTag lock lost for 8 s. All rack-frame geometry becomes unknown; on_frame_loss.then is UNVERIFIED, never a guess from a stale extrinsic.",
+    "frames": 725
+  },
+  {
+    "trace": "hazard_latch_open_while_running.jsonl",
+    "expect": {
+      "hazard": [
+        "S10"
+      ]
+    },
+    "notes": "Latch opened while the processing unit runs. No step was skipped, so sequence checking alone would never catch this. Invariant fires at CRITICAL immediately.",
+    "frames": 725
+  },
+  {
+    "trace": "fault_branch_red_indicator.jsonl",
+    "expect": {
+      "branch": "F01"
+    },
+    "notes": "Hardware fault: red indicator. Must route to F01, NOT blame the crew. Misattributing a hardware fault to the operator loses trust fastest.",
+    "frames": 625
+  }
+]

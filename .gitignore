@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+
+# Generated corpora. Both are reproducible from their generators, and the eval
+# corpus is ~300 MB - regenerate rather than commit:
+#   python tools/make_golden_traces.py     -> traces/golden/  (committed: 9 files, small)
+#   python tools/make_eval_corpus.py       -> traces/eval/    (not committed)
+traces/eval/
+traces/eval_crx2/
+runs/
+*.egg-info/
+.pytest_cache/

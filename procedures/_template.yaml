@@ -1,0 +1,222 @@
+# yaml-language-server: $schema=../schema/procedure.schema.json
+# =============================================================================
+# PARIKSHAK - new procedure template (PDL v1.0)
+# =============================================================================
+# HOW TO AUTHOR A NEW EXPERIMENT
+#
+#   1. Copy this file to procedures/<your_id>.yaml
+#   2. Fill in the blocks below, top to bottom.
+#   3. Run:  python tools/validate_procedure.py procedures/<your_id>.yaml --strict
+#   4. Fix what it tells you. It will not let you reference a thing the
+#      deployed perception build cannot see.
+#   5. Load it. No training, no code change, no redeploy.
+#
+# THE ONE RULE THAT MATTERS
+#
+#   You may only describe your experiment using the nouns in
+#   requires.detector_classes and the verbs in schema/PREDICATES.md.
+#
+#   If your procedure needs an object class the detector was never trained on,
+#   the validator stops you here rather than letting the system silently guess
+#   at run time. That is a data-collection request, not an authoring task, and
+#   it goes to the perception team. Everything inside the existing vocabulary
+#   costs you an afternoon; everything outside it costs a labelling campaign.
+#   Knowing which side of that line you are on is the point of this file.
+#
+# The line editors can autocomplete this file: point your YAML language server
+# at schema/procedure.schema.json (the directive on line 1 does it for VS Code).
+# =============================================================================
+
+pdl_version: "1.0"
+
+procedure:
+  id: XXX-1                          # short, stable, appears in every log record
+  ps_id: "26174"        # SIH 2026 problem statement
+  title: ""
+  revision: 1
+  revised_utc: "YYYY-MM-DDTHH:MM:SSZ"
+  author: ""
+  applies_to_rack: ""
+  criticality: nominal               # nominal | critical
+  language: en-IN
+  estimated_duration_s: 0            # must equal the sum of nominal_s on the
+                                     # nominal path; the validator checks this
+
+# -----------------------------------------------------------------------------
+# CAPABILITY CONTRACT - declare only what you actually use.
+# Declaring a capability nothing references costs frame budget on a 25 W part,
+# so the validator warns about unused entries as well as missing ones.
+# -----------------------------------------------------------------------------
+requires:
+  min_model_version: "parikshak-perception-1.2.0"
+  capabilities:
+    - object_detection
+    - rack_frame_extrinsics
+    # - object_state          # needed for state_is()
+    # - object_pose_6dof      # needed for aligned()
+    # - hand_landmarks        # needed for grasped/released/contacting/hand_in_zone
+    # - hand_object_contact
+    # - body_pose             # needed for body_restrained/body_in_zone
+    # - motion_tcn            # needed for motion_is/motion_count
+    # - crew_confirm          # needed for crew_confirmed()
+  detector_classes:
+    # Must be a subset of the deployed model's class map. Ask the perception
+    # team for the current list; do not invent entries here.
+    - ""
+
+frame:
+  type: rack
+  fiducials:
+    family: tag36h11
+    ids: []
+    layout_file: racks/<rack>_fiducials.json
+  min_tags_for_lock: 2
+  on_frame_loss:
+    action: hold_last_known
+    max_hold_s: 3.0
+    then: UNVERIFIED       # do not change this to a guess
+
+# -----------------------------------------------------------------------------
+# ZONES - volumes in RACK coordinates, metres. Measure these once with the
+# fiducial jig. They do not change when the rack, camera or crew rotates.
+# -----------------------------------------------------------------------------
+zones:
+  workspace: { type: box, min: [-0.70, -0.60, -0.15], max: [0.70, 0.45, 0.40] }
+  # my_zone:   { type: box, min: [x, y, z], max: [x, y, z] }
+  # my_target: { type: sphere, centre: [x, y, z], radius: 0.05 }
+
+# -----------------------------------------------------------------------------
+# ENTITIES - the specific physical items this procedure talks about.
+# Declare `confusable_with` for any sibling that looks similar. That list is the
+# only reason WRONG_OBJECT alerts can name the item the crew actually picked up
+# instead of just saying "something is wrong".
+# -----------------------------------------------------------------------------
+entities:
+  my_item:
+    detector_class: ""               # must appear in requires.detector_classes
+    label: ""
+    tts_name: ""                     # how Piper should pronounce it aloud
+    # instance_key:    { method: barcode | colour_band | glyph, value: "" }
+    # confusable_with: []
+    # states:          [open, closed, unknown]   # include 'unknown'; a state
+    #                                            # head with no abstain option
+    #                                            # invents values under occlusion
+
+# Only if you use motion_is / motion_count. Classes must exist in the deployed
+# TCN registry - naming a new one here does not train it.
+# Every phrase a crew_confirmed predicate waits for. The voice grammar is built
+# from this list, so an undeclared token can never be heard. Quote them - a bare
+# yes/no/on/off is parsed as a boolean.
+# crew_tokens: ["label verified"]
+
+# motion_classes:
+#   registry_version: "tcn-motion-1.1.0"
+#   classes: [idle, reach, insert, rotate_seal, press, agitate, withdraw]
+
+# -----------------------------------------------------------------------------
+# ALERT POLICY - copy these values unless you have measured your own ROC.
+# The defaults are the operating point tuned for <= 1 false alarm per 45 minutes
+# of monitored operation. Loosening them is a decision you must be able to
+# defend with held-out numbers.
+# -----------------------------------------------------------------------------
+alert_policy:
+  complete_threshold: 0.85
+  deviation_threshold: 0.85
+  persistence_s: 1.5
+  unverified_after_s: 4.0
+  max_alerts_per_step: 2
+  cooldown_s: 8.0
+  severity_tiers:
+    info:     { channel: [gui] }
+    advisory: { channel: [gui, chime] }
+    caution:  { channel: [gui, chime, voice] }
+    critical: { channel: [gui, chime, voice], repeat_s: 10, require_ack: true }
+  crew_override:
+    enabled: true
+    tokens: ["override", "mark done", "continue anyway"]
+    logs_as: OPERATOR_OVERRIDE
+  advisory_only: true                # this system never blocks or commands hardware
+
+logging:
+  format: jsonl
+  hash_chain: sha256
+  mirror_text: true
+  clock: { wall: utc, monotonic: met }
+  embed_hashes: [procedure_file, detector_weights, tcn_weights, contact_weights]
+  evidence:
+    keyframe_on_transition: true
+    clip_on_deviation: { pre_s: 10, post_s: 10 }
+  downlink:
+    package: cfdp
+    priority: { log: high, deviation_clips: medium, full_video: low }
+
+# =============================================================================
+# FLOW
+# =============================================================================
+flow:
+  entry: S01
+  exit: [S02]                        # must list exactly the terminal: true steps
+
+  # Steps whose order genuinely does not matter go in an unordered group.
+  # Use this wherever it is true. Every group you declare is a class of false
+  # alarm you will never have to explain to a sceptical crew member.
+  groups: []
+  # groups:
+  #   - id: G_GATHER
+  #     type: unordered
+  #     members: [S02, S03]          # each member must declare next: [G_GATHER]
+  #     successor: S04
+  #     note: ""
+
+  steps:
+
+    - id: S01
+      name: ""
+      type: discrete                 # discrete | motion | wait | crew_confirm
+      prompt_tts: ""                 # spoken before the step; keep it imperative
+      objects: []                    # everything this step's logic touches;
+                                     # drives GUI highlight and evidence capture
+      preconditions:                 # what must be true to legally START
+        all: []
+      verification:                  # what must become true to mark COMPLETE
+        all: []
+      # invariants:                  # must hold THROUGHOUT; fires immediately
+      #   - expr: {}
+      #     severity: critical
+      #     tts: ""
+      effects:                       # what the world state becomes afterwards
+        - { assert: some_flag }
+        # - { set_state: { entity: my_item, state: closed } }
+        # - { retract: some_flag }
+      duration: { min_s: 1, nominal_s: 10, sigma_s: 5, max_s: 120 }
+      # min_s doubles as a too-fast check: a step completed below min_s was
+      # almost certainly not really performed. Measure these from real runs
+      # rather than guessing - they are the HSMM's prior, not decoration.
+      # critical: true               # marks the step; pair with on_skip
+      # on_skip:
+      #   severity: caution
+      #   tts: ""                    # say what to DO, not that an error occurred
+      #   reason_template: ""
+      # on_wrong_object:
+      #   severity: caution
+      #   confusable: []
+      #   tts: ""
+      # branch:                      # route off-nominal outcomes away from the
+      #   - when: {}                 # crew-error path; a hardware fault is not
+      #     goto: F01                # the operator's mistake and must not be
+      #     severity: caution        # reported as one
+      #     tts: ""
+      next: [S02]
+
+    - id: S02
+      name: ""
+      type: discrete
+      prompt_tts: ""
+      objects: []
+      preconditions:
+        all: []
+      verification:
+        all: []
+      duration: { min_s: 1, nominal_s: 10, sigma_s: 5, max_s: 120 }
+      next: []
+      terminal: true

@@ -1,0 +1,28 @@
+# PARIKSHAK live run at boot, headless. NOT YET RUN ON HARDWARE - see README.md.
+#
+#   sudo cp deploy/jetson/parikshak.service /etc/systemd/system/
+#   sudo systemctl enable --now parikshak
+
+[Unit]
+Description=PARIKSHAK procedure-compliance witness (live, headless)
+After=network.target systemd-udev-settle.service
+# Offline by design: nothing here waits for the network to be ONLINE.
+
+[Service]
+Type=simple
+User=parikshak
+WorkingDirectory=/opt/parikshak
+Environment=PYTHONUNBUFFERED=1
+ExecStartPre=/usr/bin/nvpmodel -m 0
+ExecStart=/home/parikshak/parikshak-venv/bin/python -m parikshak.run \
+    --procedure procedures/crx2_colloid_resuspension.yaml \
+    --props racks/props_crx2.json \
+    --camera 0 --headless --no-voice \
+    --log-dir /opt/parikshak/runs/live
+Restart=on-failure
+RestartSec=3
+# A crash must not take the flight record with it: the log and trace are written
+# by the run itself; systemd only restarts the process.
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,41 @@
+{
+  "_note": "The deployed perception build, as a checkable artefact. A procedure onboards with ZERO retraining exactly when everything it requires is listed here. Adding a class, a state, a motion class or a capability is a model release (new data, new weights, new version) - never a procedure edit. procedures name this file through requires.min_model_version.",
+  "build": "parikshak-perception-1.2.0",
+  "detector_classes": [
+    "sample_cartridge",
+    "vial",
+    "glovebox_latch",
+    "cartridge_holder",
+    "process_unit",
+    "status_indicator",
+    "sample_bag",
+    "stowage_locker",
+    "foot_restraint",
+    "crew_hand"
+  ],
+  "capabilities": [
+    "object_detection",
+    "object_state",
+    "object_pose_6dof",
+    "hand_landmarks",
+    "hand_object_contact",
+    "rack_frame_extrinsics",
+    "body_pose",
+    "motion_tcn",
+    "crew_confirm"
+  ],
+  "motion_registry": {
+    "version": "tcn-motion-1.1.0",
+    "classes": ["idle", "reach", "insert", "rotate_seal", "press", "agitate", "withdraw"]
+  },
+  "_state_heads_note": "What each detector class's state classifier can actually emit. A procedure asking state_is(latch, half_open) needs a retrained state head just as surely as a new object needs a retrained detector, so state vocabularies are part of the build, not of the procedure.",
+  "state_heads": {
+    "glovebox_latch": ["open", "closed", "unknown"],
+    "cartridge_holder": ["empty", "loaded", "unknown"],
+    "process_unit": ["idle", "running", "complete", "fault", "unknown"],
+    "status_indicator": ["off", "amber", "green", "red", "unknown"],
+    "sample_bag": ["open", "sealed", "unknown"]
+  },
+  "position_sigma_m": null,
+  "_position_sigma_note": "Per-axis centroid noise, measured on the held-out calibration set (PLAN.md W5). Null until measured - an invented value is worse than none."
+}

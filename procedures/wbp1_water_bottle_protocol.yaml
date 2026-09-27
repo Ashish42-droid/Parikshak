@@ -1,0 +1,194 @@
+# =============================================================================
+# PARIKSHAK - Procedure Definition Language (PDL) v1.0
+# =============================================================================
+# WBP-1 : Water Bottle Protocol (Interactive Activity Benchmark)
+#
+# Ground-truth demonstration and activity protocol for validating human procedure
+# compliance. Tracks:
+#   1. S01: Target bottle identified resting on table surface
+#   2. S02: Hand grasps and lifts bottle off table surface
+#   3. S03: Bottle brought to mouth/face region to drink water (held for >= 1.5 s)
+#   4. S04: Bottle returned to table surface and released
+#
+# Deviations guarded:
+#   - Out-of-order execution (attempting to drink or return before grasping)
+#   - Skipped drinking (lifting and directly placing down)
+#   - Wrong item (grasping confusable cup instead of bottle)
+# =============================================================================
+
+pdl_version: "1.0"
+
+procedure:
+  id: WBP-1
+  ps_id: "26174"
+  title: "Water Bottle Protocol (Activity Benchmark)"
+  revision: 1
+  revised_utc: "2026-09-26T12:00:00Z"
+  author: "Activity Ops / Human Factors"
+  applies_to_rack: BENCH-1
+  criticality: nominal
+  language: en-IN
+  estimated_duration_s: 45
+
+requires:
+  min_model_version: "parikshak-perception-1.2.0"
+  capabilities:
+    - object_detection
+    - hand_landmarks
+    - hand_object_contact
+    - rack_frame_extrinsics
+  detector_classes:
+    - vial
+
+frame:
+  type: rack
+  fiducials:
+    family: tag36h11
+    ids: [101, 102]
+    layout_file: racks/msg_a_fiducials.json
+  min_tags_for_lock: 0
+  on_frame_loss:
+    action: hold_last_known
+    max_hold_s: 5.0
+    then: UNVERIFIED
+
+zones:
+  workspace:          { type: box, min: [-0.70, -0.60, -0.15], max: [0.70, 0.45, 0.40] }
+  table_surface:      { type: box, min: [-0.40, -0.30, -0.10], max: [0.40, 0.30, 0.15] }
+  drinking_zone:      { type: box, min: [-0.20, -0.10, 0.30], max: [0.20, 0.20, 0.70] }
+
+entities:
+  bottle:
+    detector_class: vial
+    label: "Water Bottle"
+    tts_name: "water bottle"
+    confusable_with: [cup]
+
+  cup:
+    detector_class: vial
+    label: "Mug / Cup"
+    tts_name: "cup"
+    confusable_with: [bottle]
+
+alert_policy:
+  complete_threshold: 0.85
+  deviation_threshold: 0.85
+  persistence_s: 1.2
+  unverified_after_s: 4.0
+  evidence_rate_hz: 2.0
+  hold_for_tolerance: 0.2
+  max_alerts_per_step: 2
+  cooldown_s: 6.0
+  severity_tiers:
+    info:     { channel: [gui] }
+    advisory: { channel: [gui, chime] }
+    caution:  { channel: [gui, chime, voice] }
+    critical: { channel: [gui, chime, voice], repeat_s: 10, require_ack: true }
+  crew_override:
+    enabled: true
+    tokens: ["override", "mark done", "continue anyway"]
+    logs_as: OPERATOR_OVERRIDE
+  advisory_only: true
+
+logging:
+  format: jsonl
+  hash_chain: sha256
+  mirror_text: true
+  clock: { wall: utc, monotonic: met }
+  embed_hashes: [procedure_file, detector_weights, tcn_weights, contact_weights]
+  evidence:
+    keyframe_on_transition: true
+    clip_on_deviation: { pre_s: 5, post_s: 5 }
+  downlink:
+    package: cfdp
+    priority: { log: high, deviation_clips: medium, full_video: low }
+
+# =============================================================================
+# FLOW
+# =============================================================================
+flow:
+  entry: S01
+  exit: [S04]
+
+  groups: []
+
+  steps:
+    # -------------------------------------------------------------------------
+    - id: S01
+      name: "Locate water bottle on table"
+      type: discrete
+      prompt_tts: "Ensure the water bottle is resting on the table surface."
+      objects: [bottle]
+      verification:
+        all:
+          - { visible: { entity: bottle, min_conf: 0.6 } }
+          - { in_zone: { entity: bottle, zone: table_surface } }
+      effects:
+        - { assert: bottle_ready }
+      duration: { min_s: 1, nominal_s: 5, sigma_s: 2, max_s: 60 }
+      next: [S02]
+
+    # -------------------------------------------------------------------------
+    - id: S02
+      name: "Grasp and lift bottle"
+      type: discrete
+      prompt_tts: "Grasp the water bottle and lift it off the table."
+      objects: [bottle]
+      preconditions:
+        all:
+          - { assert_true: bottle_ready }
+      verification:
+        all:
+          - { grasped: { entity: bottle } }
+          - { not: { in_zone: { entity: bottle, zone: table_surface } } }
+      effects:
+        - { assert: bottle_in_hand }
+      duration: { min_s: 1, nominal_s: 10, sigma_s: 4, max_s: 90 }
+      on_wrong_object:
+        severity: caution
+        confusable: [cup]
+        tts: "Wrong object grasped. That is the cup, not the water bottle."
+      next: [S03]
+
+    # -------------------------------------------------------------------------
+    - id: S03
+      name: "Drink water from bottle"
+      type: discrete
+      prompt_tts: "Bring the bottle to your mouth and drink water."
+      objects: [bottle]
+      preconditions:
+        all:
+          - { assert_true: bottle_in_hand }
+      verification:
+        hold_for:
+          seconds: 1.5
+          expr:
+            all:
+              - { grasped: { entity: bottle } }
+              - { in_zone: { entity: bottle, zone: drinking_zone } }
+      effects:
+        - { assert: water_consumed }
+      duration: { min_s: 2, nominal_s: 15, sigma_s: 5, max_s: 120 }
+      on_skip:
+        severity: caution
+        tts: "Step three, drink water, was skipped. Please take a drink before returning bottle."
+        reason_template: "Bottle was placed back without registering drinking action"
+      next: [S04]
+
+    # -------------------------------------------------------------------------
+    - id: S04
+      name: "Return bottle to table surface"
+      type: discrete
+      terminal: true
+      prompt_tts: "Place the water bottle back onto the table surface and release it."
+      objects: [bottle]
+      preconditions:
+        all:
+          - { assert_true: water_consumed }
+      verification:
+        all:
+          - { in_zone: { entity: bottle, zone: table_surface } }
+          - { released: { entity: bottle } }
+      effects:
+        - { assert: protocol_complete }
+      duration: { min_s: 1, nominal_s: 15, sigma_s: 5, max_s: 120 }

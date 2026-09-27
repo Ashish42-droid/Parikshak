@@ -1,0 +1,89 @@
+[
+  {
+    "trace": "nominal.jsonl",
+    "expect": {
+      "complete": [
+        "S01",
+        "S02",
+        "S03",
+        "S04",
+        "S05",
+        "S06",
+        "S07",
+        "S08"
+      ],
+      "no_alert": true
+    },
+    "notes": "All 8 steps performed correctly and in order.",
+    "frames": 253
+  },
+  {
+    "trace": "legal_reorder_S03_S02.jsonl",
+    "expect": {
+      "complete": [
+        "S01",
+        "S02",
+        "S03",
+        "S04",
+        "S05",
+        "S06",
+        "S07",
+        "S08"
+      ],
+      "no_alert": true
+    },
+    "notes": "Unit confirmed idle before the vial is retrieved. S02 and S03 are an unordered group, so this is legal and must be silent.",
+    "frames": 253
+  },
+  {
+    "trace": "skip_S04_agitate.jsonl",
+    "expect": {
+      "skipped": [
+        "S04"
+      ]
+    },
+    "notes": "Vial placed to settle without being agitated. The sample is never resuspended, and only motion_count can tell.",
+    "frames": 213
+  },
+  {
+    "trace": "skip_S07_return.jsonl",
+    "expect": {
+      "skipped": [
+        "S07"
+      ]
+    },
+    "notes": "Run declared complete with the vial still on the bench. Critical step.",
+    "frames": 210
+  },
+  {
+    "trace": "wrong_object_vial_a.jsonl",
+    "expect": {
+      "wrong_object": [
+        "S02"
+      ]
+    },
+    "notes": "Vial A taken instead of vial B. CSP-1's wrong-object case, inverted, with no change anywhere but the procedure file.",
+    "frames": 120
+  },
+  {
+    "trace": "hazard_vial_near_unit.jsonl",
+    "expect": {
+      "hazard": [
+        "S04"
+      ]
+    },
+    "notes": "Vial agitated within 12 cm of the powered unit. A geometric invariant, built on `near`, which CSP-1 does not use.",
+    "frames": 253
+  },
+  {
+    "trace": "occlusion_S05.jsonl",
+    "expect": {
+      "unverified_at_least": [
+        "S05"
+      ],
+      "no_alert": true
+    },
+    "notes": "Crew torso blocks the tray while the vial settles. UNVERIFIED, and nothing spoken - the step was performed correctly, just unseen.",
+    "frames": 253
+  }
+]

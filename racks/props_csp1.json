@@ -1,0 +1,27 @@
+{
+  "_note": "Fiducial-marked props for a live CSP-1 run without trained detector weights (parikshak/perception/markers.py). Print each tag at exactly tag_size_m (black square edge) and fix it to the prop, facing the camera. A state is a tag too: fit the 'closed' and 'open' tags so that only the one matching the prop's real state can be seen. IDs 201+ never clash with the rack fiducials (101-104), and CRX-2 uses the same IDs, so one printed set serves both procedures.",
+  "family": "tag36h11",
+  "tag_size_m": 0.06,
+  "tags": {
+    "201": {"entity": "cartridge_sc_a"},
+    "202": {"entity": "vial_a"},
+    "203": {"entity": "vial_b"},
+    "211": {"entity": "latch", "state": "closed"},
+    "212": {"entity": "latch", "state": "open"},
+    "221": {"entity": "holder_h1", "state": "empty"},
+    "222": {"entity": "holder_h1", "state": "loaded"},
+    "231": {"entity": "process_unit", "state": "idle"},
+    "232": {"entity": "process_unit", "state": "running"},
+    "233": {"entity": "process_unit", "state": "complete"},
+    "234": {"entity": "process_unit", "state": "fault"},
+    "241": {"entity": "indicator", "state": "off"},
+    "242": {"entity": "indicator", "state": "amber"},
+    "243": {"entity": "indicator", "state": "green"},
+    "244": {"entity": "indicator", "state": "red"},
+    "251": {"entity": "sample_bag_sb01", "state": "open"},
+    "252": {"entity": "sample_bag_sb01", "state": "sealed"},
+    "261": {"entity": "locker_l1"},
+    "262": {"entity": "locker_l2"},
+    "271": {"entity": "restraint"}
+  }
+}

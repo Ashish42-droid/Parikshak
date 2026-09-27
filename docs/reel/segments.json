@@ -1,0 +1,32 @@
+[
+  {
+    "trace": "traces/eval/skip_S13__harsh_1.jsonl",
+    "procedure": "procedures/csp1_colloid_sample_processing.yaml",
+    "title": "An attached vial called SKIPPED",
+    "happened": "Nothing was injected at S07 in this run - the crew attached vial A. Under heavy noise the system told them S07 was not done.",
+    "why": "S07 needs vial A attached, aligned and held still for 2 s. While the crew carries the vial onto the cartridge (39.0-41.6 s) it is genuinely moving, which counts against the step. After that nothing contradicts it, but under this much noise 'still' honestly reads 'cannot tell', so S07 is never confirmed either. The crew closes the latch at 46.4 s, 4.8 s after the last sighting against S07: 0.2 s inside its 5 s minimum, the line for calling a skip.",
+    "measured": "Honest scoring, 130 CSP-1 runs on the current engine: 4 false alarms in all (0.85 per 45 min, inside the target of 1), and every one is this - a false SKIP of S07 under moderate or harsh degradation. Three other causes were found by frame replay and fixed.",
+    "window": [38.0, 50.0],
+    "hold_at": 48.2
+  },
+  {
+    "trace": "traces/eval/duration_rush_S12__harsh_0.jsonl",
+    "procedure": "procedures/csp1_colloid_sample_processing.yaml",
+    "title": "A rushed step that was not flagged",
+    "happened": "The cartridge was pulled out (S12) far faster than its 3 s minimum. No alert.",
+    "why": "The cartridge was hidden from 121.6 s to 123.8 s, just before the rush. The earliest S12 could have begun is the last moment S11 was seen still undone, 122.2 s - so on the most generous reading it took 3.0 s: exactly the minimum, not below it. PARIKSHAK only says 'too fast' when a step is too fast even on the most generous reading, so a blind spot right before a rush hides it.",
+    "measured": "DURATION recall 90%: 2 of 20 rushed steps missed, both under harsh degradation.",
+    "window": [119.0, 131.0],
+    "hold_at": 125.8
+  },
+  {
+    "trace": "traces/eval_crx2/nominal__harsh_1.jsonl",
+    "procedure": "procedures/crx2_colloid_resuspension.yaml",
+    "title": "A correct stow the system would not confirm",
+    "happened": "Vial B was returned to the cold locker correctly (CRX-2 S07). The checklist shows 'cannot verify' instead of complete.",
+    "why": "The stow check needs the vial still for 2 s, held for 2 s, after it is let go. An occlusion hid the vial right after release, and the crew said 'run complete' before the check could finish. Nothing contradicted the stow, so it is not called skipped - but the crew gets no confirmation either.",
+    "measured": "70 CRX-2 runs: 11 correctly done steps read 'cannot verify' (S07 x5, S05 x3, S02 x2, S04 x1), all under moderate or harsh degradation. Zero false alarms.",
+    "window": [37.0, 50.0],
+    "hold_at": 47.6
+  }
+]

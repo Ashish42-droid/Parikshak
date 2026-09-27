@@ -1,0 +1,355 @@
+# =============================================================================
+# PARIKSHAK - Procedure Definition Language (PDL) v1.0
+# =============================================================================
+# CRX-2 : Colloid Resuspension and Cold Return
+#
+# The second procedure, and the point of the whole architecture.
+#
+# It runs on the SAME rack against the SAME perception build CSP-1 targets
+# (parikshak-perception-1.2.0). It adds no detector class, no state, no motion
+# class, and no line of code. It was onboarded by writing this file and nothing
+# else; `python tools/onboard.py procedures/crx2_colloid_resuspension.yaml`
+# prints that verdict, and tests/test_second_procedure.py fails the gate if it
+# ever stops being true.
+#
+# It is deliberately NOT CSP-1 with the names changed:
+#
+#   - It uses predicates CSP-1 never touches - motion_count and near - so what
+#     the engine implements is the vocabulary, not one procedure's needs.
+#   - It inverts the wrong-object relationship. In CSP-1 vial B is the mistake;
+#     here vial B is the target and vial A is the mistake. Same detector class,
+#     same engine, one YAML block different.
+#   - It needs strictly LESS of the build: no 6-DoF object pose. A procedure
+#     declares what it uses, not everything the box can do.
+#   - Its hazard invariant is geometric (liquid near a powered unit) rather than
+#     a state check, so invariants are not secretly "the latch rule".
+# =============================================================================
+
+pdl_version: "1.0"
+
+procedure:
+  id: CRX-2
+  ps_id: "26174"        # SIH 2026 problem statement
+  title: "Colloid Resuspension and Cold Return"
+  revision: 1
+  revised_utc: "2026-09-14T09:00:00Z"
+  author: "Payload Ops / Fluid Physics"
+  applies_to_rack: MSG-A
+  criticality: nominal
+  language: en-IN
+  estimated_duration_s: 105        # nominal path; must match sum of step nominal_s
+
+# -----------------------------------------------------------------------------
+# CAPABILITY CONTRACT
+# -----------------------------------------------------------------------------
+# Checked against builds/parikshak-perception-1.2.0.json. Every class below is
+# already in that build's class map - nothing here needed a new dataset.
+# -----------------------------------------------------------------------------
+requires:
+  min_model_version: "parikshak-perception-1.2.0"
+  capabilities:
+    - object_detection
+    - object_state
+    - hand_landmarks
+    - hand_object_contact
+    - rack_frame_extrinsics
+    - body_pose
+    - motion_tcn
+    - crew_confirm
+  detector_classes:
+    - vial
+    - glovebox_latch
+    - process_unit
+    - stowage_locker
+    - foot_restraint
+    - crew_hand
+
+# -----------------------------------------------------------------------------
+# REFERENCE FRAME - same rack, same fiducials as CSP-1
+# -----------------------------------------------------------------------------
+frame:
+  type: rack
+  fiducials:
+    family: tag36h11
+    ids: [101, 102, 103, 104]
+    layout_file: racks/msg_a_fiducials.json
+  min_tags_for_lock: 2
+  on_frame_loss:
+    action: hold_last_known
+    max_hold_s: 3.0
+    then: UNVERIFIED
+
+# Zones belong to the rack, not to the procedure: these are CSP-1's coordinates
+# for the same volumes. Only the zones this procedure refers to are declared.
+zones:
+  locker_l1_cold:    { type: box, min: [-0.62, 0.05, -0.10], max: [-0.34, 0.38, 0.16] }
+  tray_t1:           { type: box, min: [-0.28, -0.20, 0.00], max: [-0.06, 0.02, 0.12] }
+  glovebox_interior: { type: box, min: [-0.05, -0.24, 0.02], max: [0.42, 0.26, 0.34] }
+  restraint_zone:    { type: box, min: [-0.45, -0.55, 0.30], max: [0.45, -0.15, 0.95] }
+  workspace:         { type: box, min: [-0.70, -0.60, -0.15], max: [0.70, 0.45, 0.40] }
+
+entities:
+  vial_a:
+    detector_class: vial
+    label: "Vial A (colloid stock)"
+    instance_key: { method: colour_band, value: blue }
+    confusable_with: [vial_b]
+    tts_name: "vial A"
+
+  vial_b:
+    detector_class: vial
+    label: "Vial B (returned sample)"
+    instance_key: { method: colour_band, value: orange }
+    confusable_with: [vial_a]
+    tts_name: "vial B"
+
+  latch:
+    detector_class: glovebox_latch
+    label: "Glovebox latch"
+    states: [open, closed, unknown]
+    tts_name: "glovebox latch"
+
+  process_unit:
+    detector_class: process_unit
+    label: "Processing unit"
+    states: [idle, running, complete, fault, unknown]
+    tts_name: "processing unit"
+
+  locker_l1:
+    detector_class: stowage_locker
+    label: "Cold stowage locker L1"
+    tts_name: "cold locker L one"
+
+  restraint:
+    detector_class: foot_restraint
+    label: "Foot restraint"
+
+  crew_hand:
+    detector_class: crew_hand
+    label: "Crew hand"
+
+motion_classes:
+  registry_version: "tcn-motion-1.1.0"
+  classes: [idle, reach, insert, rotate_seal, press, agitate, withdraw]
+
+crew_tokens: ["unit idle", "suspension uniform", "run complete"]
+
+# -----------------------------------------------------------------------------
+# ALERT POLICY - identical operating point to CSP-1
+# -----------------------------------------------------------------------------
+alert_policy:
+  complete_threshold: 0.85
+  deviation_threshold: 0.85
+  persistence_s: 1.5
+  unverified_after_s: 4.0
+  evidence_rate_hz: 2.0
+  hold_for_tolerance: 0.2
+  max_alerts_per_step: 2
+  cooldown_s: 8.0
+  severity_tiers:
+    info:     { channel: [gui] }
+    advisory: { channel: [gui, chime] }
+    caution:  { channel: [gui, chime, voice] }
+    critical: { channel: [gui, chime, voice], repeat_s: 10, require_ack: true }
+  crew_override:
+    enabled: true
+    tokens: ["override", "mark done", "continue anyway"]
+    logs_as: OPERATOR_OVERRIDE
+  advisory_only: true
+
+logging:
+  format: jsonl
+  hash_chain: sha256
+  mirror_text: true
+  clock: { wall: utc, monotonic: met }
+  embed_hashes: [procedure_file, detector_weights, tcn_weights, contact_weights]
+  evidence:
+    keyframe_on_transition: true
+    clip_on_deviation: { pre_s: 10, post_s: 10 }
+  downlink:
+    package: cfdp
+    priority: { log: high, deviation_clips: medium, full_video: low }
+
+# =============================================================================
+# FLOW
+# =============================================================================
+flow:
+  entry: S01
+  exit: [S08]
+
+  groups:
+    - id: G_PREP
+      type: unordered
+      members: [S02, S03]
+      successor: S04
+      note: "The vial may be retrieved before or after the unit is confirmed idle."
+
+  steps:
+
+    # -------------------------------------------------------------------------
+    - id: S01
+      name: "Secure in foot restraint"
+      type: discrete
+      prompt_tts: "Secure yourself in the foot restraint."
+      objects: [restraint]
+      verification:
+        hold_for:
+          seconds: 1.0
+          expr: { body_restrained: { zone: restraint_zone } }
+      effects:
+        - { assert: crew_restrained }
+      duration: { min_s: 3, nominal_s: 15, sigma_s: 6, max_s: 120 }
+      next: [G_PREP]
+
+    # -------------------------------------------------------------------------
+    - id: S02
+      name: "Retrieve vial B from cold locker L1"
+      type: discrete
+      prompt_tts: "Retrieve vial B, the orange banded vial, from cold locker L one."
+      objects: [vial_b, locker_l1]
+      preconditions:
+        all:
+          - { assert_true: crew_restrained }
+      verification:
+        all:
+          - { grasped: { entity: vial_b } }
+          - { not: { in_zone: { entity: vial_b, zone: locker_l1_cold } } }
+      effects:
+        - { assert: vial_in_hand }
+      duration: { min_s: 2, nominal_s: 20, sigma_s: 8, max_s: 180 }
+      # The substitution CSP-1 guards against, inverted: there vial B is the
+      # mistake, here it is the target. Same detector class, same engine - the
+      # only thing that differs is this block.
+      on_wrong_object:
+        severity: caution
+        confusable: [vial_a]
+        tts: "Wrong vial. That is vial A, the blue band. Retrieve vial B from cold locker L one."
+      next: [G_PREP]
+
+    # -------------------------------------------------------------------------
+    - id: S03
+      name: "Confirm processing unit idle"
+      type: crew_confirm
+      prompt_tts: "Check the processing unit is idle and the latch is closed, then say: unit idle."
+      objects: [process_unit, latch]
+      # A deliberate confirmation rather than a state check alone. A check the
+      # world already satisfies completes the instant it is reached, which would
+      # make the unordered group meaningless: the crew must actually do this.
+      verification:
+        all:
+          - { crew_confirmed: { token: "unit idle" } }
+          - { state_is: { entity: process_unit, state: idle } }
+          - { state_is: { entity: latch, state: closed } }
+      duration: { min_s: 1, nominal_s: 8, sigma_s: 4, max_s: 90 }
+      next: [G_PREP]
+
+    # -------------------------------------------------------------------------
+    - id: S04
+      name: "Resuspend vial B by agitation"
+      type: motion
+      prompt_tts: "Agitate vial B ten times to resuspend the colloid."
+      objects: [vial_b, crew_hand]
+      preconditions:
+        all:
+          - { assert_true: vial_in_hand }
+      # motion_count is a predicate CSP-1 never uses, and "shake ten times" is
+      # exactly the example schema/PREDICATES.md gives for it. Ten shakes is ten
+      # transitions into `agitate`, not the number of frames spent agitating.
+      #
+      # Latched with `occurred`, like any momentary achievement. Unlatched, the
+      # conjunction is only true while the vial is still in hand as the tenth
+      # shake registers; S05 then releases the vial by design, `grasped` reads
+      # false from that moment on, and a correctly agitated sample was reported
+      # SKIPPED whenever the hand was hidden at the tenth shake. The validator
+      # now warns about an unlatched motion_count.
+      verification:
+        occurred:
+          all:
+            - { grasped: { entity: vial_b } }
+            - { motion_count: { motion_class: agitate, n: 10, window_s: 30 } }
+      # Keep liquid away from the powered unit while shaking it. No step is
+      # skipped when this is violated, so only an invariant can catch it - and
+      # unlike CSP-1's latch rule, this one is geometric, built on `near`.
+      invariants:
+        - expr: { not: { near: { a: vial_b, b: process_unit, dist_m: 0.12 } } }
+          severity: caution
+          tts: "Keep the vial away from the processing unit while agitating."
+      effects:
+        - { assert: resuspended }
+      duration: { min_s: 4, nominal_s: 12, sigma_s: 5, max_s: 120 }
+      on_skip:
+        severity: caution
+        tts: "Step four, agitate vial B ten times, was not completed. The sample is not resuspended."
+        reason_template: "motion_count(agitate) did not reach 10 between {t_start} and {t_now}"
+      next: [S05]
+
+    # -------------------------------------------------------------------------
+    - id: S05
+      name: "Place vial B in tray T1 to settle"
+      type: wait
+      prompt_tts: "Place vial B in tray T one and let it settle for five seconds."
+      objects: [vial_b]
+      preconditions:
+        all:
+          - { assert_true: resuspended }
+      verification:
+        all:
+          - { in_zone: { entity: vial_b, zone: tray_t1 } }
+          - { released: { entity: vial_b } }
+          - { stable: { entity: vial_b, seconds: 5.0, tol_m: 0.03 } }
+      effects:
+        - { assert: settled }
+      duration: { min_s: 6, nominal_s: 20, sigma_s: 8, max_s: 180 }
+      next: [S06]
+
+    # -------------------------------------------------------------------------
+    - id: S06
+      name: "Confirm uniform suspension"
+      type: crew_confirm
+      prompt_tts: "Inspect vial B. If the suspension is uniform, say: suspension uniform."
+      objects: [vial_b]
+      verification:
+        all:
+          - { crew_confirmed: { token: "suspension uniform" } }
+          - { visible: { entity: vial_b, min_conf: 0.8 } }
+      duration: { min_s: 1, nominal_s: 10, sigma_s: 5, max_s: 120 }
+      next: [S07]
+
+    # -------------------------------------------------------------------------
+    - id: S07
+      name: "Return vial B to cold locker L1"
+      type: discrete
+      prompt_tts: "Return vial B to cold locker L one."
+      objects: [vial_b, locker_l1]
+      critical: true
+      preconditions:
+        all:
+          - { assert_true: settled }
+      verification:
+        all:
+          - { in_zone: { entity: vial_b, zone: locker_l1_cold } }
+          - { released: { entity: vial_b } }
+          - hold_for:
+              seconds: 2.0
+              expr: { stable: { entity: vial_b, seconds: 2.0, tol_m: 0.03 } }
+      effects:
+        - { retract: vial_in_hand }
+      duration: { min_s: 5, nominal_s: 15, sigma_s: 6, max_s: 240 }
+      on_skip:
+        severity: critical
+        tts: "Vial B has not been returned to cold stowage. Sample integrity is at risk."
+        reason_template: "predicate in_zone(vial_b, locker_l1_cold) never satisfied between {t_start} and {t_now}"
+      next: [S08]
+
+    # -------------------------------------------------------------------------
+    - id: S08
+      name: "Confirm run complete"
+      type: crew_confirm
+      prompt_tts: "Say: run complete."
+      objects: []
+      verification:
+        all:
+          - { crew_confirmed: { token: "run complete" } }
+      duration: { min_s: 1, nominal_s: 5, sigma_s: 3, max_s: 120 }
+      next: []
+      terminal: true

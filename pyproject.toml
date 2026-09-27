@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "parikshak"
+version = "0.1.0"
+description = "On-board procedure-compliance witness for crewed missions"
+requires-python = ">=3.11"
+dependencies = [
+    "pyyaml>=6.0",
+    "jsonschema>=4.20",
+    "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+# Perception pulls heavy wheels and is not needed to build or test the engine.
+# That separation is the point of the BeliefFrame contract - keep it installable
+# on a laptop with no GPU.
+perception = [
+    "opencv-python>=4.9",
+    "mediapipe>=0.10",
+    "onnxruntime>=1.17",
+    "pupil-apriltags>=1.0.4",
+]
+gui = ["PySide6>=6.6"]
+# The browser demo: `python -m demo`.
+web = ["fastapi>=0.110", "uvicorn>=0.29", "httpx>=0.27"]
+dev = ["pytest>=8.0", "ruff>=0.4"]
+
+[project.scripts]
+parikshak-validate = "parikshak.pdl.cli:main"
+parikshak-run = "parikshak.run:main"
+
+[tool.setuptools.packages.find]
+include = ["parikshak*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = ["E501"]

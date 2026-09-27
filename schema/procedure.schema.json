@@ -1,0 +1,1234 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://parikshak.isro.local/schema/procedure.schema.json",
+  "title": "PARIKSHAK Procedure Definition Language v1.0",
+  "description": "Structural schema for a PDL procedure file. This checks SHAPE only. Semantic checks - that every entity, zone, state, motion class and capability actually resolves against the deployed perception build - are enforced by tools/validate_procedure.py, which is the gate that must pass before load. Point a YAML language server at this file for editor autocomplete.",
+  "type": "object",
+  "required": [
+    "pdl_version",
+    "procedure",
+    "requires",
+    "frame",
+    "zones",
+    "entities",
+    "alert_policy",
+    "logging",
+    "flow"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "pdl_version": {
+      "const": "1.0"
+    },
+    "procedure": {
+      "type": "object",
+      "required": [
+        "id",
+        "title",
+        "revision",
+        "criticality",
+        "estimated_duration_s"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9]*-[0-9]+$"
+        },
+        "ps_id": {
+          "type": "string",
+          "pattern": "^[0-9]+$",
+          "description": "SIH problem statement ID this procedure was authored under."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "revised_utc": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "author": {
+          "type": "string"
+        },
+        "applies_to_rack": {
+          "type": "string"
+        },
+        "criticality": {
+          "enum": [
+            "nominal",
+            "critical"
+          ]
+        },
+        "language": {
+          "type": "string"
+        },
+        "estimated_duration_s": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Must equal the sum of nominal_s over the nominal path. Cross-checked by the validator."
+        }
+      }
+    },
+    "requires": {
+      "type": "object",
+      "description": "The capability contract. The loader refuses the file unless the deployed build satisfies every entry.",
+      "required": [
+        "capabilities",
+        "detector_classes"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "min_model_version": {
+          "type": "string"
+        },
+        "capabilities": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "object_detection",
+              "object_state",
+              "object_pose_6dof",
+              "hand_landmarks",
+              "hand_object_contact",
+              "rack_frame_extrinsics",
+              "body_pose",
+              "motion_tcn",
+              "crew_confirm"
+            ]
+          }
+        },
+        "detector_classes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$"
+          },
+          "description": "Must be a subset of the deployed detector's class map. Anything outside it is a data-collection request, not an authoring task."
+        },
+        "position_sigma_m": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Per-axis standard deviation of the deployed detector's centroid estimate, in metres, from the held-out calibration set. When present, the validator checks that geometric tolerances are loose enough to be measurable. Leave it out until measured."
+        }
+      }
+    },
+    "frame": {
+      "type": "object",
+      "required": [
+        "type",
+        "fiducials",
+        "on_frame_loss"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "rack"
+        },
+        "fiducials": {
+          "type": "object",
+          "required": [
+            "family",
+            "ids"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "family": {
+              "enum": [
+                "tag36h11",
+                "tag25h9",
+                "tagStandard41h12"
+              ]
+            },
+            "ids": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "minItems": 1
+            },
+            "layout_file": {
+              "type": "string"
+            }
+          }
+        },
+        "min_tags_for_lock": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "on_frame_loss": {
+          "type": "object",
+          "required": [
+            "then"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "enum": [
+                "hold_last_known",
+                "drop"
+              ]
+            },
+            "max_hold_s": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "then": {
+              "const": "UNVERIFIED",
+              "description": "Fixed by design. A lost rack frame must never be resolved by guessing geometry."
+            }
+          }
+        }
+      }
+    },
+    "zones": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "$ref": "#/$defs/zone"
+      }
+    },
+    "entities": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "$ref": "#/$defs/entity"
+      }
+    },
+    "motion_classes": {
+      "type": "object",
+      "required": [
+        "classes"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "registry_version": {
+          "type": "string"
+        },
+        "classes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$"
+          }
+        }
+      }
+    },
+    "crew_tokens": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "Every phrase a crew_confirmed predicate may wait for. Closed for the same reason the predicate vocabulary is: the voice grammar is built from this list, so an undeclared token is a step no microphone can ever satisfy."
+    },
+    "alert_policy": {
+      "$ref": "#/$defs/alertPolicy"
+    },
+    "logging": {
+      "$ref": "#/$defs/logging"
+    },
+    "flow": {
+      "$ref": "#/$defs/flow"
+    }
+  },
+  "$defs": {
+    "zone": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "min",
+            "max"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "box"
+            },
+            "min": {
+              "$ref": "#/$defs/vec3"
+            },
+            "max": {
+              "$ref": "#/$defs/vec3"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "centre",
+            "radius"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "sphere"
+            },
+            "centre": {
+              "$ref": "#/$defs/vec3"
+            },
+            "radius": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          }
+        }
+      ]
+    },
+    "vec3": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "number"
+      },
+      "description": "Rack-frame coordinates in metres. +X across the rack face, +Y along it, +Z out toward the crew. No gravity assumption."
+    },
+    "entity": {
+      "type": "object",
+      "required": [
+        "detector_class",
+        "label"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "detector_class": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tts_name": {
+          "type": "string",
+          "description": "Spoken form. Spell out identifiers a TTS voice would mangle."
+        },
+        "instance_key": {
+          "type": "object",
+          "required": [
+            "method",
+            "value"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "method": {
+              "enum": [
+                "barcode",
+                "colour_band",
+                "glyph",
+                "position"
+              ]
+            },
+            "value": {
+              "type": [
+                "string",
+                "number"
+              ]
+            }
+          }
+        },
+        "confusable_with": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true,
+          "description": "Siblings this item is mistakable for. Required for WRONG_OBJECT alerts to name what the crew actually picked up."
+        },
+        "states": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$"
+          },
+          "description": "Include 'unknown'. A state head with no abstain option fabricates values under occlusion."
+        },
+        "extent_m": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Characteristic radius of the object in metres. Needed only when the entity is used as a container in `inside`, which otherwise has no volume to test against."
+        }
+      }
+    },
+    "alertPolicy": {
+      "type": "object",
+      "required": [
+        "complete_threshold",
+        "deviation_threshold",
+        "persistence_s",
+        "advisory_only"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "complete_threshold": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1
+        },
+        "deviation_threshold": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1
+        },
+        "persistence_s": {
+          "type": "number",
+          "minimum": 0
+        },
+        "unverified_after_s": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "evidence_rate_hz": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 30,
+          "description": "Effective independent observations per second when accumulating verification evidence over time. Lower means consecutive frames are treated as more correlated, so more sustained evidence is needed before a step verifies. Defaults to 2."
+        },
+        "hold_for_tolerance": {
+          "type": "number",
+          "minimum": 0,
+          "exclusiveMaximum": 0.5,
+          "description": "Share of a hold_for window allowed to disagree with the rest - the window's lower bound is taken at this quantile rather than at its minimum, so isolated frames of detector noise do not break a hold. 0 restores a strict minimum. Defaults to 0.2."
+        },
+        "max_alerts_per_step": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "cooldown_s": {
+          "type": "number",
+          "minimum": 0
+        },
+        "severity_tiers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "channel": {
+                "type": "array",
+                "items": {
+                  "enum": [
+                    "gui",
+                    "chime",
+                    "voice"
+                  ]
+                }
+              },
+              "repeat_s": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "require_ack": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "crew_override": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "tokens": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "logs_as": {
+              "type": "string",
+              "description": "Overrides are recorded, never silent."
+            }
+          }
+        },
+        "advisory_only": {
+          "type": "boolean",
+          "description": "True means the system never blocks crew action or commands hardware. Setting false demands a far heavier certification case."
+        }
+      }
+    },
+    "logging": {
+      "type": "object",
+      "required": [
+        "format",
+        "hash_chain"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "const": "jsonl"
+        },
+        "hash_chain": {
+          "enum": [
+            "sha256"
+          ],
+          "description": "Each record embeds the hash of its predecessor, making the run log tamper-evident."
+        },
+        "mirror_text": {
+          "type": "boolean"
+        },
+        "clock": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "wall": {
+              "const": "utc"
+            },
+            "monotonic": {
+              "const": "met"
+            }
+          }
+        },
+        "embed_hashes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "evidence": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "keyframe_on_transition": {
+              "type": "boolean"
+            },
+            "clip_on_deviation": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "pre_s": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "post_s": {
+                  "type": "number",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        },
+        "downlink": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "package": {
+              "enum": [
+                "cfdp",
+                "raw"
+              ]
+            },
+            "priority": {
+              "type": "object",
+              "additionalProperties": {
+                "enum": [
+                  "high",
+                  "medium",
+                  "low"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "flow": {
+      "type": "object",
+      "required": [
+        "entry",
+        "exit",
+        "steps"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "entry": {
+          "$ref": "#/$defs/nodeId"
+        },
+        "exit": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nodeId"
+          },
+          "minItems": 1
+        },
+        "groups": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/group"
+          }
+        },
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/step"
+          }
+        }
+      }
+    },
+    "nodeId": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]*$"
+    },
+    "group": {
+      "type": "object",
+      "required": [
+        "id",
+        "type",
+        "members",
+        "successor"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/nodeId"
+        },
+        "type": {
+          "const": "unordered"
+        },
+        "members": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "$ref": "#/$defs/nodeId"
+          },
+          "uniqueItems": true
+        },
+        "successor": {
+          "$ref": "#/$defs/nodeId"
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "description": "Steps whose order genuinely does not matter. Every group declared is a class of false alarm that will never need explaining to a sceptical crew member."
+    },
+    "step": {
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "type",
+        "prompt_tts",
+        "verification",
+        "duration"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/nodeId"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "enum": [
+            "discrete",
+            "motion",
+            "wait",
+            "crew_confirm"
+          ]
+        },
+        "prompt_tts": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Spoken before the step. Imperative: say what to do."
+        },
+        "objects": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "critical": {
+          "type": "boolean"
+        },
+        "terminal": {
+          "type": "boolean"
+        },
+        "log_flag": {
+          "type": "string"
+        },
+        "preconditions": {
+          "$ref": "#/$defs/predicate"
+        },
+        "verification": {
+          "$ref": "#/$defs/predicate"
+        },
+        "invariants": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "expr",
+              "severity"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "expr": {
+                "$ref": "#/$defs/predicate"
+              },
+              "severity": {
+                "$ref": "#/$defs/severity"
+              },
+              "tts": {
+                "type": "string"
+              }
+            }
+          },
+          "description": "Must hold throughout the step. Fires the moment it breaks, without waiting for the step to end - this is how hazards are caught when no step was skipped."
+        },
+        "effects": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/effect"
+          }
+        },
+        "duration": {
+          "type": "object",
+          "required": [
+            "min_s",
+            "nominal_s",
+            "max_s"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "min_s": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Below this the step was almost certainly not really performed."
+            },
+            "nominal_s": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "sigma_s": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Gaussian prior width for the HSMM. Measure from real runs."
+            },
+            "max_s": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          }
+        },
+        "on_skip": {
+          "type": "object",
+          "required": [
+            "severity",
+            "tts"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "severity": {
+              "$ref": "#/$defs/severity"
+            },
+            "tts": {
+              "type": "string",
+              "description": "Say what to DO, not that an error occurred."
+            },
+            "reason_template": {
+              "type": "string",
+              "description": "Templated from the failing clause and written verbatim into the log."
+            }
+          }
+        },
+        "on_wrong_object": {
+          "type": "object",
+          "required": [
+            "severity",
+            "tts"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "severity": {
+              "$ref": "#/$defs/severity"
+            },
+            "confusable": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "tts": {
+              "type": "string"
+            }
+          }
+        },
+        "branch": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "when",
+              "goto"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "when": {
+                "$ref": "#/$defs/predicate"
+              },
+              "goto": {
+                "$ref": "#/$defs/nodeId"
+              },
+              "severity": {
+                "$ref": "#/$defs/severity"
+              },
+              "tts": {
+                "type": "string"
+              }
+            }
+          },
+          "description": "Routes off-nominal outcomes away from the crew-error path. A hardware fault is not the operator's mistake and must not be reported as one."
+        },
+        "next": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nodeId"
+          }
+        }
+      }
+    },
+    "severity": {
+      "enum": [
+        "info",
+        "advisory",
+        "caution",
+        "critical"
+      ]
+    },
+    "effect": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "assert": {
+          "type": "string"
+        },
+        "retract": {
+          "type": "string"
+        },
+        "set_state": {
+          "type": "object",
+          "required": [
+            "entity",
+            "state"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "entity": {
+              "type": "string"
+            },
+            "state": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "predicate": {
+      "description": "A predicate tree. Every leaf returns a probability in [0,1], or null when its evidence is occluded. Combinators: all -> min, any -> max, not -> 1-p, hold_for -> min over a trailing window, occurred -> max since step start. A null anywhere yields UNVERIFIED, never SKIPPED. See schema/PREDICATES.md.",
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "all": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/predicate"
+          }
+        },
+        "any": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/predicate"
+          }
+        },
+        "not": {
+          "$ref": "#/$defs/predicate"
+        },
+        "hold_for": {
+          "type": "object",
+          "required": [
+            "seconds",
+            "expr"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "seconds": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "expr": {
+              "$ref": "#/$defs/predicate"
+            }
+          }
+        },
+        "visible": {
+          "type": "object",
+          "required": [
+            "entity"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "entity": {
+              "type": "string"
+            },
+            "min_conf": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
+          }
+        },
+        "absent": {
+          "type": "object",
+          "required": [
+            "entity"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "entity": {
+              "type": "string"
+            }
+          }
+        },
+        "count_of": {
+          "type": "object",
+          "required": [
+            "entity",
+            "n"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "entity": {
+              "type": "string"
+            },
+            "n": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "grasped": {
+          "type": "object",
+          "required": [
+            "entity"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "entity": {
+              "type": "string"
+            },
+            "hand": {
+              "enum": [
+                "left",
+                "right",
+                "any",
+                "both"
+              ]
+            }
+          }
+        },
+        "released": {
+          "type": "object",
+          "required": [
+            "entity"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "entity": {
+              "type": "string"
+            }
+          }
+        },
+        "contacting": {
+          "type": "object",
+          "required": [
+            "a",
+            "b"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "a": {
+              "type": "string"
+            },
+            "b": {
+              "type": "string"
+            }
+          }
+        },
+        "hand_in_zone": {
+          "type": "object",
+          "required": [
+            "hand",
+            "zone"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "hand": {
+              "enum": [
+                "left",
+                "right",
+                "any",
+                "both"
+              ]
+            },
+            "zone": {
+              "type": "string"
+            }
+          }
+        },
+        "inside": {
+          "type": "object",
+          "required": [
+            "a",
+            "container"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "a": {
+              "type": "string"
+            },
+            "container": {
+              "type": "string"
+            },
+            "margin_m": {
+              "type": "number"
+            }
+          }
+        },
+        "near": {
+          "type": "object",
+          "required": [
+            "a",
+            "b",
+            "dist_m"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "a": {
+              "type": "string"
+            },
+            "b": {
+              "type": "string"
+            },
+            "dist_m": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          }
+        },
+        "aligned": {
+          "type": "object",
+          "required": [
+            "a",
+            "b",
+            "tol_deg"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "a": {
+              "type": "string"
+            },
+            "b": {
+              "type": "string"
+            },
+            "tol_deg": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 180
+            }
+          }
+        },
+        "in_zone": {
+          "type": "object",
+          "required": [
+            "entity",
+            "zone"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "entity": {
+              "type": "string"
+            },
+            "zone": {
+              "type": "string"
+            }
+          }
+        },
+        "stable": {
+          "type": "object",
+          "required": [
+            "entity",
+            "seconds"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "entity": {
+              "type": "string"
+            },
+            "seconds": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "tol_m": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          }
+        },
+        "state_is": {
+          "type": "object",
+          "required": [
+            "entity",
+            "state"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "entity": {
+              "type": "string"
+            },
+            "state": {
+              "type": "string"
+            }
+          }
+        },
+        "motion_is": {
+          "type": "object",
+          "required": [
+            "motion_class"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "motion_class": {
+              "type": "string"
+            },
+            "min_conf": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
+          }
+        },
+        "motion_count": {
+          "type": "object",
+          "required": [
+            "motion_class",
+            "n"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "motion_class": {
+              "type": "string"
+            },
+            "n": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "window_s": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          }
+        },
+        "body_restrained": {
+          "type": "object",
+          "required": [
+            "zone"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "zone": {
+              "type": "string"
+            }
+          }
+        },
+        "body_in_zone": {
+          "type": "object",
+          "required": [
+            "zone"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "zone": {
+              "type": "string"
+            }
+          }
+        },
+        "elapsed_since": {
+          "type": "object",
+          "required": [
+            "step_id",
+            "seconds"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "step_id": {
+              "type": "string"
+            },
+            "seconds": {
+              "type": "number",
+              "minimum": 0
+            }
+          }
+        },
+        "crew_confirmed": {
+          "type": "object",
+          "required": [
+            "token"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "token": {
+              "type": "string"
+            }
+          }
+        },
+        "occluded": {
+          "type": "object",
+          "required": [
+            "zone"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "zone": {
+              "type": "string"
+            }
+          }
+        },
+        "assert_true": {
+          "type": "string"
+        },
+        "occurred": {
+          "$ref": "#/$defs/predicate",
+          "description": "True if the inner expression held at ANY point since the current step started, rather than in the current frame. Use it for evidence that is inherently momentary - a motion class - inside a step whose other clauses describe the end state."
+        }
+      }
+    }
+  }
+}

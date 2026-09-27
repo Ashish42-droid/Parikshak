@@ -1,0 +1,647 @@
+# =============================================================================
+# PARIKSHAK - Procedure Definition Language (PDL) v1.0
+# =============================================================================
+# CSP-1 : Colloidal Suspension Sample Processing
+#
+# This file is the ONLY thing that changes when a new experiment is onboarded.
+# No model is retrained, no code is edited, no weights are touched. The loader
+# validates this file against schema/procedure.schema.json and the closed
+# predicate vocabulary in schema/PREDICATES.md before the first frame is read.
+#
+# It is simultaneously:
+#   1. the checklist the crew is prompted through,
+#   2. the verification logic that decides COMPLETE / SKIPPED / UNVERIFIED,
+#   3. the duration prior that parameterises the HSMM sequence tracker,
+#   4. the alert copy that Piper speaks aloud,
+#   5. the schema of the downlinked log.
+#
+# One source of truth. That is deliberate: a procedure and its verification
+# logic drifting apart is exactly how a compliance system starts lying.
+# =============================================================================
+
+pdl_version: "1.0"
+
+procedure:
+  id: CSP-1
+  ps_id: "26174"        # SIH 2026 problem statement
+  title: "Colloidal Suspension Sample Processing"
+  revision: 3
+  revised_utc: "2026-08-19T11:20:00Z"
+  author: "Payload Ops / Fluid Physics"
+  applies_to_rack: MSG-A
+  criticality: nominal          # nominal | critical  (critical => stricter gates)
+  language: en-IN
+  estimated_duration_s: 381        # nominal path; must match sum of step nominal_s
+
+# -----------------------------------------------------------------------------
+# CAPABILITY CONTRACT
+# -----------------------------------------------------------------------------
+# The loader refuses to run this procedure unless the deployed perception build
+# provides every capability and every detector class listed here. This is what
+# turns "zero retraining" from a claim into a checked precondition: authoring is
+# free *within* the trained class vocabulary, and loudly blocked outside it.
+# -----------------------------------------------------------------------------
+requires:
+  # Geometric tolerances below were widened from 0.01/0.02 m to 0.03 m.
+  # `stable` compares the mean positions of its window's two halves, so the
+  # tolerance it needs shrinks as the window grows: at 5 Hz, holding on >= 95%
+  # of frames for a still object takes ~2.8 sigma for a 1 s window, ~2.0 sigma
+  # for 1.5 s and ~1.3 sigma for 4 s (validator.stable_noise_floor). The first
+  # estimator took the largest single-sample distance and needed ~5 sigma at any
+  # length; under 8-15 mm of noise it read stowed objects as drifting and froze
+  # the run.
+  #
+  # TODO(W5): measure position_sigma_m on the held-out calibration set and add
+  # it here. The validator then checks these tolerances automatically. Do not
+  # invent a value - an unmeasured sigma is worse than none.
+  min_model_version: "parikshak-perception-1.2.0"
+  capabilities:
+    - object_detection
+    - object_state
+    - object_pose_6dof
+    - hand_landmarks
+    - hand_object_contact
+    - rack_frame_extrinsics
+    - body_pose
+    - motion_tcn
+    - crew_confirm
+  detector_classes:
+    - sample_cartridge
+    - vial
+    - glovebox_latch
+    - cartridge_holder
+    - process_unit
+    - status_indicator
+    - sample_bag
+    - stowage_locker
+    - foot_restraint
+    - crew_hand
+
+# -----------------------------------------------------------------------------
+# REFERENCE FRAME
+# -----------------------------------------------------------------------------
+# Recovered per frame from AprilTag 36h11 fiducials bonded to the rack face.
+# Gravity is never sampled or assumed anywhere in this file or in the engine.
+# "up" below is a naming convention for +Y and carries no physical meaning.
+# -----------------------------------------------------------------------------
+frame:
+  type: rack
+  fiducials:
+    family: tag36h11
+    ids: [101, 102, 103, 104]
+    layout_file: racks/msg_a_fiducials.json
+  min_tags_for_lock: 2
+  on_frame_loss:
+    action: hold_last_known
+    max_hold_s: 3.0
+    then: UNVERIFIED           # never guess geometry from a stale extrinsic
+
+# -----------------------------------------------------------------------------
+# ZONES - axis-aligned volumes in RACK coordinates, metres.
+# Because these are rack-relative, rotating the rack, the camera or the crew
+# member leaves every number below unchanged.
+# -----------------------------------------------------------------------------
+zones:
+  locker_l1_cold:    { type: box, min: [-0.62,  0.05, -0.10], max: [-0.34, 0.38, 0.16] }
+  locker_l2_ambient: { type: box, min: [-0.62, -0.34, -0.10], max: [-0.34, -0.02, 0.16] }
+  tray_t1:           { type: box, min: [-0.28, -0.20,  0.00], max: [-0.06, 0.02, 0.12] }
+  glovebox_interior: { type: box, min: [-0.05, -0.24,  0.02], max: [ 0.42, 0.26, 0.34] }
+  holder_h1_seat:    { type: box, min: [ 0.10, -0.06,  0.04], max: [ 0.24, 0.08, 0.14] }
+  restraint_zone:    { type: box, min: [-0.45, -0.55,  0.30], max: [ 0.45, -0.15, 0.95] }
+  workspace:         { type: box, min: [-0.70, -0.60, -0.15], max: [ 0.70, 0.45, 0.40] }
+  start_button:      { type: sphere, centre: [0.36, 0.14, 0.06], radius: 0.045 }
+
+# -----------------------------------------------------------------------------
+# ENTITIES - the nouns this procedure is allowed to talk about.
+# `detector_class` must appear in requires.detector_classes.
+# `instance_key` is how one physical item is disambiguated from a sibling of the
+# same class (colour tag, printed glyph, barcode). WRONG_OBJECT detection is
+# only meaningful because siblings are declared as `confusable_with`.
+# -----------------------------------------------------------------------------
+entities:
+
+  cartridge_sc_a:
+    detector_class: sample_cartridge
+    label: "Cartridge SC-A"
+    instance_key: { method: barcode, value: "SC-A-0417" }
+    tts_name: "cartridge S C A"
+
+  vial_a:
+    detector_class: vial
+    label: "Vial A (colloid stock)"
+    instance_key: { method: colour_band, value: blue }
+    confusable_with: [vial_b]
+    tts_name: "vial A"
+
+  vial_b:
+    detector_class: vial
+    label: "Vial B (buffer) - NOT used in CSP-1"
+    instance_key: { method: colour_band, value: orange }
+    confusable_with: [vial_a]
+    tts_name: "vial B"
+
+  latch:
+    detector_class: glovebox_latch
+    label: "Glovebox latch"
+    states: [open, closed, unknown]
+    tts_name: "glovebox latch"
+
+  holder_h1:
+    detector_class: cartridge_holder
+    label: "Processing holder H1"
+    states: [empty, loaded, unknown]
+
+  process_unit:
+    detector_class: process_unit
+    label: "Colloid processing unit"
+    states: [idle, running, complete, fault, unknown]
+
+  indicator:
+    detector_class: status_indicator
+    label: "Status indicator"
+    # "off" MUST be quoted: YAML 1.1 parses bare off/on/yes/no as booleans,
+    # which silently turns this state name into False.
+    states: ["off", amber, green, red, unknown]
+
+  sample_bag_sb01:
+    detector_class: sample_bag
+    label: "Sample bag SB-01"
+    states: [open, sealed, unknown]
+    tts_name: "sample bag S B zero one"
+    # Used as a container in S13's `inside`. Without a declared extent the
+    # engine has no volume to test the cartridge centroid against.
+    extent_m: 0.09
+
+  locker_l1:
+    detector_class: stowage_locker
+    label: "Cold stowage locker L1"
+
+  locker_l2:
+    detector_class: stowage_locker
+    label: "Ambient stowage locker L2"
+
+  restraint:
+    detector_class: foot_restraint
+    label: "Foot restraint"
+
+  crew_hand:
+    detector_class: crew_hand
+    label: "Crew hand"
+
+# Motion classes the 1D-TCN is trained to emit. Referenced by motion_is /
+# motion_count. Naming a class here that the deployed TCN does not emit is
+# caught by the validator against motion_classes.registry_version.
+motion_classes:
+  registry_version: "tcn-motion-1.1.0"
+  classes: [idle, reach, insert, rotate_seal, press, agitate, withdraw]
+
+# -----------------------------------------------------------------------------
+# CREW TOKENS
+# -----------------------------------------------------------------------------
+# Every phrase a crew_confirmed predicate waits for. The voice grammar is built
+# from this list, so a token used in a step but missing here is rejected at load
+# rather than discovered at the rack when the crew says it and nothing happens.
+# -----------------------------------------------------------------------------
+crew_tokens: ["label verified", "fault logged", "acknowledged"]
+
+# -----------------------------------------------------------------------------
+# ALERT POLICY
+# -----------------------------------------------------------------------------
+# Tuned on held-out runs against a target of <= 1 false alarm per 45 MINUTES of
+# monitored operation. Stated as a rate, not per-run: CSP-1 is a 6-minute
+# procedure and a per-run budget would silently loosen the gate for it.
+# Thresholds live here, not inside steps, so the whole operating point can be
+# moved with one edit and one number reported to the reviewer.
+# -----------------------------------------------------------------------------
+alert_policy:
+  complete_threshold: 0.85       # verification tree >= this  -> COMPLETE
+  deviation_threshold: 0.85      # deviation posterior >= this -> alert
+  persistence_s: 1.5             # must hold this long before speaking
+  unverified_after_s: 4.0        # occluded this long -> UNVERIFIED, not SKIPPED
+  evidence_rate_hz: 2.0          # independent looks per second when accumulating belief
+  hold_for_tolerance: 0.2        # share of a hold_for window that may disagree
+  max_alerts_per_step: 2         # never nag
+  cooldown_s: 8.0
+  severity_tiers:
+    info:     { channel: [gui] }
+    advisory: { channel: [gui, chime] }
+    caution:  { channel: [gui, chime, voice] }
+    critical: { channel: [gui, chime, voice], repeat_s: 10, require_ack: true }
+  crew_override:
+    enabled: true
+    tokens: ["override", "mark done", "continue anyway"]
+    logs_as: OPERATOR_OVERRIDE   # overrides are never silent
+  advisory_only: true            # this system never blocks or commands hardware
+
+# -----------------------------------------------------------------------------
+# LOGGING
+# -----------------------------------------------------------------------------
+logging:
+  format: jsonl
+  hash_chain: sha256             # each record carries hash of the previous
+  mirror_text: true              # human-readable .txt for the ground PI
+  clock: { wall: utc, monotonic: met }
+  embed_hashes: [procedure_file, detector_weights, tcn_weights, contact_weights]
+  evidence:
+    keyframe_on_transition: true
+    clip_on_deviation: { pre_s: 10, post_s: 10 }
+  downlink:
+    package: cfdp
+    priority: { log: high, deviation_clips: medium, full_video: low }
+
+# =============================================================================
+# FLOW
+# =============================================================================
+flow:
+  entry: S01
+  exit: [S14, FAULT_END]
+
+  # ---------------------------------------------------------------------------
+  # UNORDERED GROUPS
+  # ---------------------------------------------------------------------------
+  # Real procedures contain steps whose order genuinely does not matter. If the
+  # engine treats every reordering as a deviation it generates false alarms, and
+  # the crew stops trusting it. Declaring the group makes a legal reordering a
+  # non-event. This block exists specifically to protect the false-alarm budget.
+  # ---------------------------------------------------------------------------
+  groups:
+    - id: G_GATHER
+      type: unordered
+      members: [S02, S03]
+      successor: S04
+      note: "Cartridge and vial may be retrieved in either order."
+
+  steps:
+
+    # -------------------------------------------------------------------------
+    - id: S01
+      name: "Secure in foot restraint"
+      type: discrete
+      prompt_tts: "Secure yourself in the foot restraint and confirm the workspace is clear."
+      objects: [restraint]
+      preconditions:
+        all:
+          - { visible: { entity: restraint } }
+      verification:
+        hold_for:
+          seconds: 2.0
+          expr:
+            all:
+              - { body_restrained: { zone: restraint_zone } }
+      effects:
+        - { assert: crew_restrained }
+      duration: { min_s: 5, nominal_s: 25, sigma_s: 12, max_s: 180 }
+      next: [G_GATHER]
+
+    # -------------------------------------------------------------------------
+    - id: S02
+      name: "Retrieve cartridge SC-A from locker L2"
+      type: discrete
+      prompt_tts: "Retrieve cartridge S C A from ambient locker L two."
+      objects: [cartridge_sc_a, locker_l2]
+      preconditions:
+        all:
+          - { assert_true: crew_restrained }
+      verification:
+        all:
+          - { grasped: { entity: cartridge_sc_a, hand: any } }
+          - { not: { in_zone: { entity: cartridge_sc_a, zone: locker_l2_ambient } } }
+      effects:
+        - { assert: cartridge_in_hand }
+      duration: { min_s: 4, nominal_s: 30, sigma_s: 14, max_s: 240 }
+      on_wrong_object:
+        severity: caution
+        tts: "That is not cartridge S C A. Check the barcode before continuing."
+      next: [G_GATHER]
+
+    # -------------------------------------------------------------------------
+    - id: S03
+      name: "Retrieve vial A from tray T1"
+      type: discrete
+      prompt_tts: "Retrieve vial A, the blue banded vial, from tray T one."
+      objects: [vial_a, vial_b]
+      preconditions:
+        all:
+          - { assert_true: crew_restrained }
+      verification:
+        all:
+          - { grasped: { entity: vial_a, hand: any } }
+          - { not: { in_zone: { entity: vial_a, zone: tray_t1 } } }
+      effects:
+        - { assert: vial_in_hand }
+      duration: { min_s: 4, nominal_s: 22, sigma_s: 10, max_s: 180 }
+      # The wrong-object demo beat. Vial B is physically adjacent and visually
+      # near-identical apart from the colour band, which is exactly the error a
+      # fatigued crew member makes and a checklist tablet cannot catch.
+      on_wrong_object:
+        severity: caution
+        confusable: [vial_b]
+        tts: "Wrong vial. You are holding vial B, the orange band. Vial A is blue banded."
+      next: [G_GATHER]
+
+    # -------------------------------------------------------------------------
+    - id: S04
+      name: "Verify cartridge label against run ID"
+      type: crew_confirm
+      prompt_tts: "Confirm the cartridge barcode reads S C A zero four one seven."
+      objects: [cartridge_sc_a, crew_hand]
+      preconditions:
+        all:
+          - { grasped: { entity: cartridge_sc_a } }
+      # A barcode read is an act of attention, not a geometric coincidence.
+      # An earlier revision accepted "cartridge visible AND near the hand for
+      # 2 s", which is true whenever the crew is simply holding it - so this
+      # step verified during S03 and the engine reported S03 as skipped.
+      # Deliberate confirmation is the only honest evidence here.
+      verification:
+        all:
+          - { crew_confirmed: { token: "label verified" } }
+          - { visible: { entity: cartridge_sc_a, min_conf: 0.90 } }
+      duration: { min_s: 3, nominal_s: 15, sigma_s: 8, max_s: 120 }
+      next: [S05]
+
+    # -------------------------------------------------------------------------
+    - id: S05
+      name: "Open glovebox latch"
+      type: discrete
+      prompt_tts: "Open the glovebox latch."
+      objects: [latch]
+      preconditions:
+        all:
+          - { visible: { entity: latch } }
+      verification:
+        hold_for:
+          seconds: 1.0
+          expr: { state_is: { entity: latch, state: open } }
+      effects:
+        - { set_state: { entity: latch, state: open } }
+      duration: { min_s: 2, nominal_s: 8, sigma_s: 4, max_s: 90 }
+      next: [S06]
+
+    # -------------------------------------------------------------------------
+    - id: S06
+      name: "Insert cartridge into holder H1"
+      type: motion
+      prompt_tts: "Insert the cartridge into processing holder H one until it seats."
+      objects: [cartridge_sc_a, holder_h1, latch]
+      preconditions:
+        all:
+          - { state_is: { entity: latch, state: open } }
+          - { grasped: { entity: cartridge_sc_a } }
+      verification:
+        all:
+          # `occurred` scopes the clause to the whole step. The insert motion
+          # and the released-and-seated end state are claims about different
+          # moments; demanding both in the same frame made this step
+          # unverifiable. See schema/PREDICATES.md section 1.
+          - occurred: { motion_is: { motion_class: insert, min_conf: 0.55 } }
+          - { inside: { a: cartridge_sc_a, container: holder_h1_seat, margin_m: 0.03 } }
+          - hold_for:
+              seconds: 1.5
+              expr: { stable: { entity: cartridge_sc_a, seconds: 1.5, tol_m: 0.03 } }
+          - { released: { entity: cartridge_sc_a } }
+      effects:
+        - { set_state: { entity: holder_h1, state: loaded } }
+        - { retract: cartridge_in_hand }
+      duration: { min_s: 4, nominal_s: 35, sigma_s: 15, max_s: 300 }
+      next: [S07]
+
+    # -------------------------------------------------------------------------
+    - id: S07
+      name: "Attach vial A to cartridge port"
+      type: motion
+      prompt_tts: "Attach vial A to the cartridge port and rotate to seal."
+      objects: [vial_a, cartridge_sc_a, holder_h1]
+      preconditions:
+        all:
+          - { state_is: { entity: holder_h1, state: loaded } }
+          - { grasped: { entity: vial_a } }
+      verification:
+        all:
+          - occurred: { motion_is: { motion_class: rotate_seal, min_conf: 0.55 } }
+          - { contacting: { a: vial_a, b: cartridge_sc_a } }
+          - { aligned: { a: vial_a, b: cartridge_sc_a, tol_deg: 12 } }
+          - hold_for:
+              seconds: 2.0
+              expr: { stable: { entity: vial_a, seconds: 2.0, tol_m: 0.03 } }
+      effects:
+        - { assert: vial_attached }
+        - { retract: vial_in_hand }
+      duration: { min_s: 5, nominal_s: 40, sigma_s: 18, max_s: 300 }
+      next: [S08]
+
+    # -------------------------------------------------------------------------
+    # THE SKIP TARGET.
+    # Physically easy to forget, consequential if missed, and trivially
+    # verifiable - which makes it an honest demo beat rather than a staged one.
+    # -------------------------------------------------------------------------
+    - id: S08
+      name: "Close glovebox latch"
+      type: discrete
+      prompt_tts: "Close the glovebox latch."
+      objects: [latch]
+      critical: true
+      preconditions:
+        all:
+          - { assert_true: vial_attached }
+      verification:
+        hold_for:
+          seconds: 1.0
+          expr: { state_is: { entity: latch, state: closed } }
+      effects:
+        - { set_state: { entity: latch, state: closed } }
+      duration: { min_s: 2, nominal_s: 9, sigma_s: 4, max_s: 90 }
+      on_skip:
+        severity: caution
+        tts: "Step eight, close the glovebox latch, was not completed. Close the latch before starting the run."
+        # The reason string is templated from the failing clause at runtime and
+        # written verbatim into the log. Every alert is defensible after the fact.
+        reason_template: "predicate state_is(latch, closed) never satisfied between {t_start} and {t_now}"
+      next: [S09]
+
+    # -------------------------------------------------------------------------
+    - id: S09
+      name: "Press START on processing unit"
+      type: discrete
+      prompt_tts: "Press start on the processing unit."
+      objects: [process_unit, indicator, latch, holder_h1]
+      preconditions:
+        all:
+          - { state_is: { entity: latch, state: closed } }
+          - { state_is: { entity: holder_h1, state: loaded } }
+      verification:
+        all:
+          - occurred:
+              any:
+                - { motion_is: { motion_class: press } }
+                - { hand_in_zone: { hand: any, zone: start_button } }
+          - { state_is: { entity: process_unit, state: running } }
+      # HAZARD INVARIANT. Must remain true for the whole step. If the crew opens
+      # the latch while the unit is running this fires immediately at CRITICAL,
+      # rather than waiting for the step to end. Sequence checking alone would
+      # never catch this, because no step was skipped.
+      invariants:
+        - expr: { state_is: { entity: latch, state: closed } }
+          severity: critical
+          tts: "Stop. The glovebox latch is open while the processing unit is running."
+      duration: { min_s: 1, nominal_s: 10, sigma_s: 5, max_s: 120 }
+      next: [S10]
+
+    # -------------------------------------------------------------------------
+    - id: S10
+      name: "Monitor 60 second process cycle"
+      type: wait
+      prompt_tts: "Processing. Monitor the status indicator for sixty seconds."
+      objects: [process_unit, indicator]
+      preconditions:
+        all:
+          - { state_is: { entity: process_unit, state: running } }
+      verification:
+        all:
+          - { elapsed_since: { step_id: S09, seconds: 60 } }
+          - { state_is: { entity: process_unit, state: complete } }
+      invariants:
+        - expr: { state_is: { entity: latch, state: closed } }
+          severity: critical
+          tts: "Stop. The glovebox latch is open while the processing unit is running."
+      duration: { min_s: 55, nominal_s: 66, sigma_s: 6, max_s: 180 }
+      # BRANCHING. A red indicator is not a crew error, it is a hardware fault,
+      # and the system must route to the fault procedure instead of blaming the
+      # operator. Misattributing a hardware fault to the crew is the fastest way
+      # to lose their trust permanently.
+      branch:
+        - when: { state_is: { entity: indicator, state: red } }
+          goto: F01
+          severity: caution
+          tts: "Processing fault indicated. Switching to the fault response procedure."
+        - when: { state_is: { entity: indicator, state: green } }
+          goto: S11
+      next: [S11]
+
+    # -------------------------------------------------------------------------
+    - id: S11
+      name: "Open glovebox latch"
+      type: discrete
+      prompt_tts: "Open the glovebox latch."
+      objects: [latch, process_unit]
+      preconditions:
+        all:
+          - { state_is: { entity: process_unit, state: complete } }
+      verification:
+        hold_for:
+          seconds: 1.0
+          expr: { state_is: { entity: latch, state: open } }
+      effects:
+        - { set_state: { entity: latch, state: open } }
+      duration: { min_s: 2, nominal_s: 8, sigma_s: 4, max_s: 90 }
+      next: [S12]
+
+    # -------------------------------------------------------------------------
+    - id: S12
+      name: "Remove cartridge from holder H1"
+      type: motion
+      prompt_tts: "Remove the cartridge from holder H one."
+      objects: [cartridge_sc_a, holder_h1, latch]
+      preconditions:
+        all:
+          - { state_is: { entity: latch, state: open } }
+      verification:
+        all:
+          - occurred: { motion_is: { motion_class: withdraw, min_conf: 0.55 } }
+          - { grasped: { entity: cartridge_sc_a } }
+          - { not: { inside: { a: cartridge_sc_a, container: holder_h1_seat } } }
+      effects:
+        - { set_state: { entity: holder_h1, state: empty } }
+        - { assert: cartridge_in_hand }
+      duration: { min_s: 3, nominal_s: 28, sigma_s: 12, max_s: 240 }
+      next: [S13]
+
+    # -------------------------------------------------------------------------
+    - id: S13
+      name: "Seal cartridge in sample bag SB-01"
+      type: discrete
+      prompt_tts: "Place the cartridge in sample bag S B zero one and seal it."
+      objects: [cartridge_sc_a, sample_bag_sb01]
+      critical: true
+      preconditions:
+        all:
+          - { grasped: { entity: cartridge_sc_a } }
+          - { visible: { entity: sample_bag_sb01 } }
+      verification:
+        all:
+          - { inside: { a: cartridge_sc_a, container: sample_bag_sb01, margin_m: 0.03 } }
+          - hold_for:
+              seconds: 1.5
+              expr: { state_is: { entity: sample_bag_sb01, state: sealed } }
+      effects:
+        - { set_state: { entity: sample_bag_sb01, state: sealed } }
+        - { retract: cartridge_in_hand }
+      duration: { min_s: 6, nominal_s: 45, sigma_s: 20, max_s: 300 }
+      on_skip:
+        severity: caution
+        tts: "The sample bag is not sealed. Seal bag S B zero one before stowing."
+      next: [S14]
+
+    # -------------------------------------------------------------------------
+    - id: S14
+      name: "Stow sample bag in cold locker L1"
+      type: discrete
+      prompt_tts: "Stow the sealed bag in cold stowage locker L one. This completes the run."
+      objects: [sample_bag_sb01, locker_l1]
+      critical: true
+      preconditions:
+        all:
+          - { state_is: { entity: sample_bag_sb01, state: sealed } }
+      verification:
+        all:
+          - { in_zone: { entity: sample_bag_sb01, zone: locker_l1_cold } }
+          - { released: { entity: sample_bag_sb01 } }
+          # In microgravity an unrestrained item drifts. "Stowed" therefore means
+          # stationary for three seconds, not merely inside the locker volume at
+          # one instant. This is the kind of clause a ground-based design omits.
+          - hold_for:
+              seconds: 3.0
+              expr: { stable: { entity: sample_bag_sb01, seconds: 3.0, tol_m: 0.03 } }
+      duration: { min_s: 7, nominal_s: 40, sigma_s: 18, max_s: 300 }
+      on_skip:
+        severity: critical
+        tts: "The sample bag is not stowed in cold stowage. Sample integrity is at risk."
+      next: []
+      terminal: true
+
+    # -------------------------------------------------------------------------
+    # FAULT BRANCH
+    # -------------------------------------------------------------------------
+    - id: F01
+      name: "Fault response - safe the unit"
+      type: discrete
+      prompt_tts: "Fault detected. Leave the latch closed and photograph the status indicator."
+      objects: [indicator, latch]
+      preconditions:
+        all:
+          - { state_is: { entity: indicator, state: red } }
+      verification:
+        any:
+          - { crew_confirmed: { token: "fault logged" } }
+          - { elapsed_since: { step_id: S10, seconds: 120 } }
+      invariants:
+        - expr: { state_is: { entity: latch, state: closed } }
+          severity: critical
+          tts: "Do not open the glovebox latch during a fault condition."
+      duration: { min_s: 10, nominal_s: 90, sigma_s: 40, max_s: 600 }
+      next: [FAULT_END]
+
+    - id: FAULT_END
+      name: "Run terminated on fault"
+      type: discrete
+      prompt_tts: "Run terminated on fault. The log has been marked for priority downlink."
+      objects: []
+      preconditions:
+        all: []
+      verification:
+        all:
+          - { crew_confirmed: { token: "acknowledged" } }
+      duration: { min_s: 1, nominal_s: 10, sigma_s: 5, max_s: 300 }
+      next: []
+      terminal: true
+      log_flag: PRIORITY_DOWNLINK
