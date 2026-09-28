@@ -15,6 +15,7 @@ import pytest
 
 pytest.importorskip("cv2")
 
+from parikshak.belief.frame import BeliefFrame  # noqa: E402
 from parikshak.belief.trace import read_trace  # noqa: E402
 from parikshak.engine.runner import ProcedureEngine  # noqa: E402
 from parikshak.eval.scene import TagScene  # noqa: E402
@@ -177,3 +178,16 @@ def test_a_streaming_session_refuses_to_finish_under_another_name(crx2, tmp_path
         live.finish(trace_path=tmp_path / "b.jsonl")
     live.finish()
     assert (tmp_path / "a.jsonl").exists() and not (tmp_path / "b.jsonl").exists()
+
+
+def test_live_session_with_deep_learning_suite(crx2):
+    live = session(crx2, camera(duration=0.3), use_deep_learning=True)
+    assert "motion_tcn" in live.capabilities
+    assert "hand_object_contact" in live.capabilities
+    assert "body_pose" in live.capabilities
+    assert "contact" in live.pipeline.model_versions()
+    assert "motion" in live.pipeline.model_versions()
+    tick = live.tick()
+    assert tick is not None
+    assert isinstance(tick.frame, BeliefFrame)
+

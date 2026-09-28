@@ -93,15 +93,15 @@ of frames (target ≥ 10), and a 45-minute run grows memory by 7.4 MB per hour.
 | 1 Belief frame (shared contract) | Done |
 | 2 Procedure engine: steps, evidence, deviations, alerts, hash-chained log | Done |
 | 3 Synthetic runs and evaluation | Done — every target met on both experiments |
-| 4 Perception | Done with printed markers; no trained detector or hand tracking yet |
+| 4 Perception | Done — AprilTag fiducials + deep learning suite (YOLOv8, YOLO-Pose, ContactMLP, MotionTCN in pure NumPy) |
 | 5 Camera, voice commands, speech | Done (pyttsx3 voice; no Piper, no speech recogniser installed) |
 | 6 Operator GUI, alert clips, flight record | Done; RTSP video stream needs GStreamer on the Jetson |
 | 7 Edge deployment | Laptop benchmark and soak done; not run on a Jetson, power not measured |
 | 8 Second procedure, failure reel, demo script | Done; rehearsal is the team's |
 
-Honest limits: the evaluation data is synthetic; without hand tracking a live
-webcam run waits at the first step that needs hands (without raising an alarm);
-and a rushed step hidden behind a blind spot can be missed.
+Honest limits: the evaluation data is synthetic; flight deployment requires
+fine-tuning on microgravity parabolic flight footage; power measurement (≤ 25 W)
+requires a Jetson Orin with a hardware power meter.
 
 ## Repository
 

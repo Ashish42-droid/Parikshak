@@ -248,3 +248,199 @@ class AprilTagDetector:
         return [TagObservation(int(np.ravel(i)[0]),
                                np.asarray(c, dtype=float).reshape(4, 2)[::-1])
                 for c, i in zip(corners, ids)]
+
+
+# --------------------------------------------------------------------------
+# Deep Learning Backends: YOLOv8 and Motion-TCN
+# --------------------------------------------------------------------------
+class YoloDetector:
+    """Ultralytics YOLOv8 detector with ByteTrack track association.
+
+    Maps detected object classes into Parikshak's Detection format with stable
+    track IDs across frames.
+    """
+
+    DEFAULT_CLASS_MAPPING = {
+        "bottle": "vial",
+        "wine glass": "vial",
+        "cup": "vial",
+        "cell phone": "sample_cartridge",
+        "book": "stowage_locker",
+        "backpack": "sample_bag",
+        "suitcase": "sample_bag",
+        "scissors": "cartridge_holder",
+    }
+
+    def __init__(self, model_path: str = "yolov8n.pt", *,
+                 class_mapping: dict[str, str] | None = None,
+                 score_threshold: float = 0.25,
+                 track: bool = True) -> None:
+        try:
+            from ultralytics import YOLO
+        except ImportError as exc:
+            raise ImportError(
+                "YoloDetector needs ultralytics: pip install ultralytics") from exc
+        import hashlib
+        from pathlib import Path
+
+        p = Path(model_path)
+        self.weights_sha256 = (
+            hashlib.sha256(p.read_bytes()).hexdigest() if p.exists() else "yolov8n-weights"
+        )
+        self.model = YOLO(model_path)
+        self.class_mapping = class_mapping or dict(self.DEFAULT_CLASS_MAPPING)
+        self.score_threshold = score_threshold
+        self.track = track
+
+    def __call__(self, image: Image) -> list[Detection]:
+        if self.track:
+            try:
+                results = self.model.track(image, persist=True, verbose=False, imgsz=320)[0]
+            except Exception:
+                results = self.model(image, verbose=False, imgsz=320)[0]
+        else:
+            results = self.model(image, verbose=False, imgsz=320)[0]
+
+        out: list[Detection] = []
+        if results.boxes is None or len(results.boxes) == 0:
+            return out
+
+        for box in results.boxes:
+            conf = float(box.conf[0].item())
+            if conf < self.score_threshold:
+                continue
+            cls_id = int(box.cls[0].item())
+            raw_cls = self.model.names[cls_id]
+            cls_name = self.class_mapping.get(raw_cls, raw_cls)
+            x1, y1, x2, y2 = [float(v) for v in box.xyxy[0].tolist()]
+            track_id = int(box.id[0].item()) if (box.id is not None and len(box.id) > 0) else None
+
+            out.append(Detection(
+                cls=cls_name,
+                score=conf,
+                box_px=(x1, y1, x2, y2),
+                track_id=track_id,
+            ))
+        return out
+
+
+class YoloPoseEstimator:
+    """Ultralytics YOLOv8-pose estimator for crew body keypoints."""
+
+    KEYPOINT_NAMES = (
+        "nose", "left_eye", "right_eye", "left_ear", "right_ear",
+        "left_shoulder", "right_shoulder", "left_elbow", "right_elbow",
+        "left_wrist", "right_wrist", "left_hip", "right_hip",
+        "left_knee", "right_knee", "left_ankle", "right_ankle",
+    )
+
+    def __init__(self, model_path: str = "yolov8n-pose.pt", *, min_score: float = 0.25) -> None:
+        try:
+            from ultralytics import YOLO
+        except ImportError as exc:
+            raise ImportError(
+                "YoloPoseEstimator needs ultralytics: pip install ultralytics") from exc
+        import hashlib
+        from pathlib import Path
+
+        p = Path(model_path)
+        self.weights_sha256 = (
+            hashlib.sha256(p.read_bytes()).hexdigest() if p.exists() else "yolov8n-pose-weights"
+        )
+        self.model = YOLO(model_path)
+        self.min_score = min_score
+
+    def __call__(self, image: Image) -> BodyKeypoints | None:
+        results = self.model(image, verbose=False, imgsz=320)[0]
+        if results.keypoints is None or len(results.keypoints) == 0:
+            return None
+        kpts_data = results.keypoints.data[0].cpu().numpy()  # (17, 3) (x, y, conf)
+        mean_score = float(np.mean(kpts_data[:, 2]))
+        if mean_score < self.min_score:
+            return None
+
+        points_px = kpts_data[:, :2].astype(float)
+        joints_rack: dict[str, tuple[float, float, float]] = {}
+        for idx, name in enumerate(self.KEYPOINT_NAMES):
+            if kpts_data[idx, 2] >= self.min_score:
+                px, py = float(points_px[idx, 0]), float(points_px[idx, 1])
+                joints_rack[name] = ((px - 320.0) / 320.0, (py - 240.0) / 240.0, 1.0)
+
+        if "left_ankle" in joints_rack:
+            joints_rack["ankle_l"] = joints_rack["left_ankle"]
+        if "right_ankle" in joints_rack:
+            joints_rack["ankle_r"] = joints_rack["right_ankle"]
+
+        if "left_hip" in joints_rack and "right_hip" in joints_rack:
+            lh = joints_rack["left_hip"]
+            rh = joints_rack["right_hip"]
+            joints_rack["pelvis"] = ((lh[0] + rh[0]) / 2.0, (lh[1] + rh[1]) / 2.0, 1.0)
+
+        return BodyKeypoints(
+            score=mean_score,
+            points_px=points_px,
+            names=self.KEYPOINT_NAMES,
+            points_rack=joints_rack,
+        )
+
+
+class YoloHands:
+    """Hand tracker using YOLO pose arm kinematics or MediaPipe."""
+
+    def __init__(self, pose_model: YoloPoseEstimator | None = None) -> None:
+        self.pose_estimator = pose_model or YoloPoseEstimator()
+        self._mp = None
+        try:
+            self._mp = MediaPipeHands()
+        except Exception:
+            self._mp = None
+
+    def __call__(self, image: Image) -> list[HandLandmarks]:
+        if self._mp is not None:
+            try:
+                res = self._mp(image)
+                if res:
+                    return res
+            except Exception:
+                pass
+
+        body = self.pose_estimator(image)
+        if body is None:
+            return []
+
+        out: list[HandLandmarks] = []
+        pts = body.points_px
+
+        for wrist_idx, elbow_idx, side in [(9, 7, "left"), (10, 8, "right")]:
+            wrist = pts[wrist_idx]
+            elbow = pts[elbow_idx]
+            arm_vec = wrist - elbow
+            arm_len = float(np.linalg.norm(arm_vec)) or 10.0
+            span = max(20.0, arm_len * 0.4)
+            unit_dir = arm_vec / arm_len
+
+            kpts21 = np.zeros((21, 2), dtype=float)
+            kpts21[0] = wrist
+            perp_dir = np.array([-unit_dir[1], unit_dir[0]])
+            palm_center = wrist + unit_dir * (span * 0.5)
+
+            offsets = [-0.4, -0.2, 0.0, 0.2, 0.4]
+            tips = [4, 8, 12, 16, 20]
+            for tip_idx, offset in zip(tips, offsets):
+                kpts21[tip_idx] = palm_center + unit_dir * (span * 0.5) + perp_dir * (span * offset)
+
+            for i in range(1, 21):
+                if i not in tips:
+                    kpts21[i] = wrist + (kpts21[tips[min(i // 4, 4)]] - wrist) * (float(i % 4) / 4.0)
+
+            out.append(HandLandmarks(
+                side=side,
+                score=float(body.score),
+                points_px=kpts21,
+            ))
+        return out
+
+
+# Re-export TcnMotionClassifier for convenience
+from parikshak.perception.motion import TcnMotionClassifier
+

@@ -39,7 +39,10 @@ from parikshak.belief.trace import read_trace
 from parikshak.engine.predicates import PredicateEvaluator, RunFacts
 from parikshak.engine.runner import ProcedureEngine, RunSummary
 from parikshak.pdl import load_procedure
-from tests.test_predicates import THR, frame
+try:
+    from tests.test_predicates import THR, frame
+except ImportError:
+    from test_predicates import THR, frame
 
 ROOT = Path(__file__).resolve().parent.parent
 CSP1 = ROOT / "procedures" / "csp1_colloid_sample_processing.yaml"

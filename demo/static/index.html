@@ -1920,7 +1920,7 @@ td.num { text-align: right; }
         drinkBox.style.display = "block";
         const pct = d.progress_pct || 0;
         const holdS = d.hold_duration_s || 0;
-        const targetS = d.target_duration_s || 2.0;
+        const targetS = d.target_duration_s || 1.4;
         const inProg = d.in_progress;
         const waterDone = d.water_consumed;
 
@@ -1933,7 +1933,7 @@ td.num { text-align: right; }
           $("#t-drinking-hint").textContent = "Water consumption verified nominal. Proceed to return bottle to table.";
         } else if (inProg || pct > 0) {
           $("#t-drinking-label").textContent = `⏳ Verifying Drinking (${pct}%)`;
-          $("#t-drinking-hint").textContent = "Maintain bottle at mouth steadily to reach 100% (2.0 seconds).";
+          $("#t-drinking-hint").textContent = `Maintain bottle at mouth steadily to reach 100% (${targetS.toFixed(1)} seconds).`;
         } else {
           $("#t-drinking-label").textContent = "🥤 Bring Bottle to Mouth to Drink";
           $("#t-drinking-hint").textContent = "Raise bottle opening to mouth zone and tilt to drink.";
@@ -1951,7 +1951,7 @@ td.num { text-align: right; }
         settleBox.style.display = "block";
         const pct = s.progress_pct || 0;
         const holdS = s.hold_duration_s || 0;
-        const targetS = s.target_duration_s || 1.2;
+        const targetS = s.target_duration_s || 1.0;
         const inProg = s.in_progress;
         const isRet = s.is_returned;
         const handsRel = s.hands_released;
@@ -1971,7 +1971,7 @@ td.num { text-align: right; }
           $("#t-settle-hint").textContent = "Release hands from bottle and pull hands away.";
         } else {
           $("#t-settle-label").textContent = `⏳ Verifying Hand Release (${pct}%)`;
-          $("#t-settle-hint").textContent = "Hands released. Verifying stable resting state...";
+          $("#t-settle-hint").textContent = `Hands released. Verifying stable resting state (${targetS.toFixed(1)}s)...`;
         }
       } else {
         settleBox.style.display = "none";

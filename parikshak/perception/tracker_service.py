@@ -382,16 +382,16 @@ class TrackerService:
                     cur.status = "completed"
                     cur.completed_at = now
                     if cur.id == "S01":
-                        self.tracker.s01_stable_duration = 1.2
+                        self.tracker.s01_stable_duration = self.tracker.S01_TARGET_S
                     elif cur.id == "S02":
                         self.tracker.target_lifted = True
-                        self.tracker.s02_lift_duration = 1.2
+                        self.tracker.s02_lift_duration = self.tracker.S02_TARGET_S
                     elif cur.id == "S03":
                         self.tracker.water_consumed = True
-                        self.tracker.drink_hold_duration = 2.0
+                        self.tracker.drink_hold_duration = self.tracker.S03_TARGET_S
                     elif cur.id == "S04" or self.tracker.step_idx >= len(self.tracker.steps) - 1:
                         self.tracker.protocol_complete = True
-                        self.tracker.s04_settle_duration = 1.2
+                        self.tracker.s04_settle_duration = self.tracker.S04_TARGET_S
                     self.tracker._advance_step(now)
             elif event_name == "inject_skip":
                 # Mark step S03 as skipped

@@ -44,6 +44,12 @@ class DeviationAlert:
 class YoloExperimentTracker:
     """End-to-end vision tracker and procedure validator using YOLO and OpenCV."""
 
+    # Calibration and verification hold targets (in seconds)
+    S01_TARGET_S = 1.0  # Stable on table
+    S02_TARGET_S = 1.0  # Grasp and lift
+    S03_TARGET_S = 1.4  # Drinking hold
+    S04_TARGET_S = 1.0  # Return to table & release
+
     def __init__(self, experiment_id: str = "WBP-1") -> None:
         self.experiment_id = experiment_id.upper()
         self.load_models()
@@ -134,23 +140,23 @@ class YoloExperimentTracker:
         self.baseline_table_y: float | None = None
         self.initial_bottle_y: float | None = None
 
-        # Step 1: Stability on table calibration (target: 1.2s)
+        # Step 1: Stability on table calibration (target: 1.0s)
         self.s01_stable_start: float | None = None
         self.s01_stable_duration: float = 0.0
 
-        # Step 2: Grasp and lift verification (target: 1.2s)
+        # Step 2: Grasp and lift verification (target: 1.0s)
         self.s02_lift_start: float | None = None
         self.s02_lift_duration: float = 0.0
         self.target_lifted = False
 
-        # Step 3: Sustained drinking verification (target: 2.0s)
+        # Step 3: Sustained drinking verification (target: 1.4s)
         self.drink_hold_start: float | None = None
         self.drink_hold_duration: float = 0.0
         self.last_drinking_seen_time: float = 0.0
         self.water_consumed = False
         self.abandon_table_start: float | None = None
 
-        # Step 4: Return to table and hands released (target: 1.2s)
+        # Step 4: Return to table and hands released (target: 1.0s)
         self.s04_settle_start: float | None = None
         self.s04_settle_duration: float = 0.0
         self.last_s04_seen_time: float = 0.0
@@ -222,24 +228,42 @@ class YoloExperimentTracker:
 
             # Keypoint indices in COCO:
             # 0: nose, 1: left_eye, 2: right_eye, 3: left_ear, 4: right_ear
+            # 5: left_shoulder, 6: right_shoulder
             # 9: left_wrist, 10: right_wrist
             nose = kpts[0]
             left_eye = kpts[1]
             right_eye = kpts[2]
+            left_shoulder = kpts[5]
+            right_shoulder = kpts[6]
 
-            if nose[2] > 0.25:
+            if nose[2] > 0.20:
                 head_point = (float(nose[0]), float(nose[1]))
                 mouth_region = (head_point[0], head_point[1] + 28.0)  # estimated mouth position below nose
                 self.last_known_mouth = mouth_region
                 self.last_known_mouth_time = current_time
-            elif left_eye[2] > 0.25 and right_eye[2] > 0.25:
+            elif left_eye[2] > 0.20 and right_eye[2] > 0.20:
                 # If nose is covered by bottle during drinking, estimate mouth from eye center!
                 eye_mid_x = (float(left_eye[0]) + float(right_eye[0])) / 2.0
                 eye_mid_y = (float(left_eye[1]) + float(right_eye[1])) / 2.0
                 mouth_region = (eye_mid_x, eye_mid_y + 45.0)
                 self.last_known_mouth = mouth_region
                 self.last_known_mouth_time = current_time
-            elif self.last_known_mouth is not None and (current_time - self.last_known_mouth_time) < 3.0:
+            elif left_eye[2] > 0.20:
+                mouth_region = (float(left_eye[0]) + 15.0, float(left_eye[1]) + 45.0)
+                self.last_known_mouth = mouth_region
+                self.last_known_mouth_time = current_time
+            elif right_eye[2] > 0.20:
+                mouth_region = (float(right_eye[0]) - 15.0, float(right_eye[1]) + 45.0)
+                self.last_known_mouth = mouth_region
+                self.last_known_mouth_time = current_time
+            elif left_shoulder[2] > 0.20 and right_shoulder[2] > 0.20:
+                # Fallback to shoulder center if face completely occluded
+                sh_x = (float(left_shoulder[0]) + float(right_shoulder[0])) / 2.0
+                sh_y = (float(left_shoulder[1]) + float(right_shoulder[1])) / 2.0
+                mouth_region = (sh_x, sh_y - 95.0)
+                self.last_known_mouth = mouth_region
+                self.last_known_mouth_time = current_time
+            elif self.last_known_mouth is not None and (current_time - self.last_known_mouth_time) < 10.0:
                 # Use recent cached mouth position if bottle/hand completely occluded face while drinking
                 mouth_region = self.last_known_mouth
 
@@ -290,26 +314,39 @@ class YoloExperimentTracker:
         if target_box is not None and mouth_region is not None:
             bx1, by1, bx2, by2 = target_box
             b_height = by2 - by1
+            b_width = bx2 - bx1
             top_center = ((bx1 + bx2) / 2.0, by1)  # top drinking opening of bottle
+            top_left = (bx1, by1)
+            top_right = (bx2, by1)
             mx, my = mouth_region
 
-            dist_to_mouth = math.hypot(top_center[0] - mx, top_center[1] - my)
+            # Distance from mouth to bottle top / cap / upper corners (handles tilted bottles)
+            dist_top = math.hypot(top_center[0] - mx, top_center[1] - my)
+            dist_tl = math.hypot(top_left[0] - mx, top_left[1] - my)
+            dist_tr = math.hypot(top_right[0] - mx, top_right[1] - my)
+            dist_to_mouth = min(dist_top, dist_tl, dist_tr)
 
-            # Check if mouth coordinates overlap or are inside bottle upper half
-            mouth_overlap = (bx1 - 25.0 <= mx <= bx2 + 25.0) and (by1 - 35.0 <= my <= by1 + b_height * 0.70)
+            # Distance from mouth to bottle bounding box edge
+            dist_x = max(bx1 - mx, 0.0, mx - bx2)
+            dist_y = max(by1 - my, 0.0, my - by2)
+            box_dist_to_mouth = math.hypot(dist_x, dist_y)
 
-            # Mouth contact threshold (tightened from 110px to 75px to prevent premature trigger)
-            if dist_to_mouth < 75.0 or mouth_overlap:
+            # Check if mouth coordinates overlap or are inside bottle upper half / near upper opening
+            mouth_overlap = (bx1 - 35.0 <= mx <= bx2 + 35.0) and (by1 - 40.0 <= my <= by1 + b_height * 0.75)
+
+            # Realistic mouth contact threshold for 480p camera:
+            # Handles bottle held directly to mouth, tilted sideways, or overlapping mouth region
+            if (dist_to_mouth < 110.0 or box_dist_to_mouth < 45.0 or mouth_overlap) and (by1 < my + 60.0):
                 near_mouth = True
 
         # Table surface baseline (calibrated during S01 when resting on table)
         table_zone_y = h * 0.65
+        ref_table = self.baseline_table_y or table_zone_y
         in_table_zone = False
         if target_box is not None:
             b_bottom = target_box[3]
-            ref_table = self.baseline_table_y or table_zone_y
             # In table zone if resting on or below the table reference line
-            if b_bottom >= (ref_table - 25.0) or (b_bottom > h * 0.58):
+            if b_bottom >= (ref_table - 35.0) or (b_bottom > h * 0.52):
                 in_table_zone = True
 
         # Vertical Lift Calculation
@@ -318,23 +355,23 @@ class YoloExperimentTracker:
         if target_box is not None:
             b_bottom = target_box[3]
             b_center_y = (target_box[1] + target_box[3]) / 2.0
-            ref_y = self.baseline_table_y or table_zone_y
             if self.initial_bottle_y is not None:
                 lift_delta = self.initial_bottle_y - b_center_y
 
-            # True physical lift: bottle bottom lifted > 30px off baseline table surface
-            if ((ref_y - b_bottom) > 30.0 or lift_delta > 30.0) and b_bottom < (ref_y - 15.0):
+            # True physical lift: bottle bottom lifted > 25px off baseline table surface
+            if ((ref_table - b_bottom) > 25.0 or lift_delta > 25.0) and b_bottom < (ref_table - 15.0):
                 is_lifted = True
 
         # Genuine Drinking Pose requires:
-        # 1. Bottle top is near or overlapping mouth zone
-        # 2. Bottle is lifted well off the table (not sitting on desk)
-        # 3. Hand is holding the bottle (hand contact or wrist < 95px)
-        if target_box is not None and near_mouth and is_lifted and (hand_contact_target or closest_wrist_dist < 95.0):
-            is_drinking_pose = True
+        # 1. Bottle top or box is near mouth zone
+        # 2. Bottle is raised (lifted or in upper frame near face)
+        # 3. Hand is holding the bottle (hand contact or wrist nearby)
+        if target_box is not None and near_mouth and (is_lifted or target_box[1] < (h * 0.60)):
+            if hand_contact_target or closest_wrist_dist < 110.0 or len(wrists) == 0:
+                is_drinking_pose = True
 
-        # Tight grasp detection specifically for Step 4 release checking:
-        # A true active grasp requires wrist to be directly on/overlapping bottle (< 42px or 0.65x width)
+        # Grasp detection for Step 4 release checking:
+        # Active grasp requires wrist directly touching/overlapping the bottle
         is_grasping_target = False
         if target_box is not None:
             bx1, by1, bx2, by2 = target_box
@@ -344,16 +381,16 @@ class YoloExperimentTracker:
                 dist_x = max(bx1 - wx, 0.0, wx - bx2)
                 dist_y = max(by1 - wy, 0.0, wy - by2)
                 dist = math.hypot(dist_x, dist_y)
-                if dist < max(42.0, b_width * 0.65):
+                if dist < max(28.0, b_width * 0.45):
                     is_grasping_target = True
 
         # Hands Released Condition:
         # User has let go of the bottle if wrists are not actively gripping it,
-        # or if wrist is pulled away >= 60px, or if no hands are visible in camera frame.
+        # or if wrist is pulled away, or if no hands are visible in camera frame.
         hands_released = False
         if len(wrists) == 0:
             hands_released = True
-        elif closest_wrist_dist >= 60.0 or (not is_grasping_target and closest_wrist_dist >= 48.0):
+        elif closest_wrist_dist >= 35.0 or not is_grasping_target:
             hands_released = True
 
         # Returned to Table Surface Condition:
@@ -362,8 +399,8 @@ class YoloExperimentTracker:
         if target_box is not None:
             b_bottom = target_box[3]
             b_top = target_box[1]
-            away_from_mouth = (not near_mouth) and (dist_to_mouth > 115.0 or mouth_region is None or (mouth_region and b_top > (mouth_region[1] + 25.0)))
-            in_surface_zone = (b_bottom >= (h * 0.62)) or (self.baseline_table_y is not None and b_bottom >= (self.baseline_table_y - 30.0))
+            away_from_mouth = (not near_mouth) and (dist_to_mouth > 95.0 or mouth_region is None or (mouth_region and b_top > (mouth_region[1] + 20.0)))
+            in_surface_zone = in_table_zone or (not is_lifted) or (b_bottom >= (ref_table - 40.0)) or (b_bottom > h * 0.50)
             if away_from_mouth and in_surface_zone:
                 is_returned_to_table = True
 
@@ -398,7 +435,7 @@ class YoloExperimentTracker:
                 # Requirements:
                 # 1. Target bottle detected in frame.
                 # 2. Bottle is resting in table zone (not held up in mid-air).
-                # 3. Must stay resting stably on table for >= 1.2 seconds to calibrate baseline.
+                # 3. Must stay resting stably on table for >= 1.0 seconds to calibrate baseline.
                 if target_box is not None and in_table_zone and not is_lifted:
                     if self.s01_stable_start is None:
                         self.s01_stable_start = current_time
@@ -408,7 +445,7 @@ class YoloExperimentTracker:
                     self.baseline_table_y = target_box[3]
                     self.initial_bottle_y = (target_box[1] + target_box[3]) / 2.0
 
-                    if self.s01_stable_duration >= 1.2:
+                    if self.s01_stable_duration >= self.S01_TARGET_S:
                         active_step.status = "completed"
                         active_step.completed_at = current_time
                         self._advance_step(current_time)
@@ -427,15 +464,15 @@ class YoloExperimentTracker:
                     pass
                 else:
                     # Requirements:
-                    # 1. Hand grasp detected on bottle (hand_contact_target or wrist < 80px)
-                    # 2. Bottle lifted vertically off table surface (is_lifted == True and lift_delta > 30px)
-                    # 3. Must maintain grasp + lift for >= 1.2 seconds (genuine physical hold)
-                    grasp_detected = hand_contact_target or (closest_wrist_dist < 80.0)
+                    # 1. Hand grasp detected on bottle (hand_contact_target or wrist < 90px)
+                    # 2. Bottle lifted vertically off table surface (is_lifted == True and lift_delta > 25px)
+                    # 3. Must maintain grasp + lift for >= 1.0 seconds (genuine physical hold)
+                    grasp_detected = hand_contact_target or (closest_wrist_dist < 90.0)
                     if grasp_detected and is_lifted:
                         if self.s02_lift_start is None:
                             self.s02_lift_start = current_time
                         self.s02_lift_duration += dt
-                        if self.s02_lift_duration >= 1.2:
+                        if self.s02_lift_duration >= self.S02_TARGET_S:
                             self.target_lifted = True
                             active_step.status = "completed"
                             active_step.completed_at = current_time
@@ -449,9 +486,8 @@ class YoloExperimentTracker:
             # STEP 3: S03 - Drink water from bottle
             # ==========================================
             elif active_step.id == "S03":
-                # Strict Precondition: S01 & S02 must be completed, and bottle was lifted!
-                if self.steps[0].status != "completed" or self.steps[1].status != "completed" or not self.target_lifted:
-                    # Step 2 was not completed!
+                # Precondition: S01 completed
+                if self.steps[0].status != "completed":
                     pass
                 else:
                     # Sustained drinking hold accumulation
@@ -461,27 +497,28 @@ class YoloExperimentTracker:
                         self.drink_hold_duration += dt
                         self.last_drinking_seen_time = current_time
 
-                        # Check if genuine drinking duration (>= 2.0 seconds) is achieved
-                        if self.drink_hold_duration >= 2.0:
+                        # Check if genuine drinking duration (target: 1.4s) is achieved
+                        if self.drink_hold_duration >= self.S03_TARGET_S:
                             self.water_consumed = True
                             active_step.status = "completed"
                             active_step.completed_at = current_time
                             self._advance_step(current_time)
                             active_step = self.steps[self.step_idx] if self.step_idx < len(self.steps) else None
                     else:
-                        # Allow brief pose flicker (up to 0.8s) without wiping accumulated drinking progress
-                        if (current_time - self.last_drinking_seen_time) > 0.8:
+                        # Allow brief pose flicker (up to 1.2s) without wiping accumulated drinking progress
+                        if (current_time - self.last_drinking_seen_time) > 1.2:
                             self.drink_hold_start = None
-                            self.drink_hold_duration = max(0.0, self.drink_hold_duration - (dt * 0.4))
+                            self.drink_hold_duration = max(0.0, self.drink_hold_duration - (dt * 0.3))
 
-                    # Check for Premature Return to Table:
-                    if in_table_zone and not is_lifted and not self.water_consumed:
+                    # Check for genuine premature lowering / skipping:
+                    # Only if bottle is returned to table, hands released, and held there for >= 2.5s
+                    if in_table_zone and not is_lifted and not self.water_consumed and hands_released:
                         if self.abandon_table_start is None:
                             self.abandon_table_start = current_time
 
                         abandon_time = current_time - self.abandon_table_start
-                        if abandon_time < 2.0:
-                            # Prompt user immediately that drinking has not finished
+                        if abandon_time < 2.5:
+                            # Prompt user that drinking has not finished
                             self._trigger_alert(
                                 step_id="S03",
                                 severity="caution",
@@ -492,20 +529,18 @@ class YoloExperimentTracker:
                             )
                         else:
                             # User set bottle down on table and let go without drinking
-                            hands_released = (not hand_contact_target) and (closest_wrist_dist > 75.0)
-                            if hands_released:
-                                self._trigger_alert(
-                                    step_id="S03",
-                                    severity="caution",
-                                    kind="skipped",
-                                    message="Step S03 Skipped! Bottle placed on table without drinking water.",
-                                    tts="Warning. Step three skipped. Water was not consumed.",
-                                    t=current_time,
-                                )
-                                active_step.status = "skipped"
-                                active_step.completed_at = current_time
-                                self._advance_step(current_time)
-                                active_step = self.steps[self.step_idx] if self.step_idx < len(self.steps) else None
+                            self._trigger_alert(
+                                step_id="S03",
+                                severity="caution",
+                                kind="skipped",
+                                message="Step S03 Skipped! Bottle placed on table without drinking water.",
+                                tts="Warning. Step three skipped. Water was not consumed.",
+                                t=current_time,
+                            )
+                            active_step.status = "skipped"
+                            active_step.completed_at = current_time
+                            self._advance_step(current_time)
+                            active_step = self.steps[self.step_idx] if self.step_idx < len(self.steps) else None
                     else:
                         self.abandon_table_start = None
 
@@ -513,22 +548,21 @@ class YoloExperimentTracker:
             # STEP 4: S04 - Return bottle to table & release
             # ==========================================
             elif active_step.id == "S04":
-                # Strict Precondition: Bottle was lifted and water was consumed
-                if not self.target_lifted or not self.water_consumed:
+                # Precondition: Step 1 completed (bottle was part of protocol)
+                if self.steps[0].status != "completed":
                     pass
                 else:
                     # Requirements:
                     # 1. Bottle returned to table surface (lowered from mouth, in table zone)
                     # 2. Hands released and pulled away from bottle
-                    # 3. Stable released state accumulated for >= 1.2s
-                    # NO auto-advance timer shortcut!
+                    # 3. Stable released state accumulated for >= 1.0s
                     if is_returned_to_table and hands_released:
                         if self.s04_settle_start is None:
                             self.s04_settle_start = current_time
                         self.s04_settle_duration += dt
                         self.last_s04_seen_time = current_time
 
-                        if self.s04_settle_duration >= 1.2:
+                        if self.s04_settle_duration >= self.S04_TARGET_S:
                             self.protocol_complete = True
                             active_step.status = "completed"
                             active_step.completed_at = current_time
@@ -543,10 +577,10 @@ class YoloExperimentTracker:
                                 t=current_time,
                             )
                     else:
-                        # Allow brief pose/detection flicker (up to 0.6s) without wiping accumulated progress
-                        if (current_time - self.last_s04_seen_time) > 0.6:
+                        # Allow brief pose/detection flicker (up to 1.2s) without wiping accumulated progress
+                        if (current_time - self.last_s04_seen_time) > 1.2:
                             self.s04_settle_start = None
-                            self.s04_settle_duration = max(0.0, self.s04_settle_duration - (dt * 0.5))
+                            self.s04_settle_duration = max(0.0, self.s04_settle_duration - (dt * 0.4))
 
         # 5. Draw High-Tech Mission Control Visual HUD (OpenCV)
         annotated = frame.copy()
@@ -573,7 +607,7 @@ class YoloExperimentTracker:
         # 6. Generate Telemetry Package
         completed_count = sum(1 for s in self.steps if s.status == "completed")
         compliance_pct = int((completed_count / len(self.steps)) * 100) if self.steps else 100
-        drinking_pct = min(100, int((self.drink_hold_duration / 2.0) * 100))
+        drinking_pct = min(100, int((self.drink_hold_duration / self.S03_TARGET_S) * 100))
 
         step_telemetry = []
         for s in self.steps:
@@ -584,16 +618,16 @@ class YoloExperimentTracker:
             elif s.status == "active":
                 if s.id == "S01":
                     is_step_verifying = (self.s01_stable_duration > 0.0)
-                    step_pct = min(100, int((self.s01_stable_duration / 1.2) * 100))
+                    step_pct = min(100, int((self.s01_stable_duration / self.S01_TARGET_S) * 100))
                 elif s.id == "S02":
                     is_step_verifying = (self.s02_lift_duration > 0.0)
-                    step_pct = min(100, int((self.s02_lift_duration / 1.2) * 100))
+                    step_pct = min(100, int((self.s02_lift_duration / self.S02_TARGET_S) * 100))
                 elif s.id == "S03":
                     is_step_verifying = (is_drinking_pose or self.drink_hold_duration > 0.0)
-                    step_pct = min(100, int((self.drink_hold_duration / 2.0) * 100))
+                    step_pct = min(100, int((self.drink_hold_duration / self.S03_TARGET_S) * 100))
                 elif s.id == "S04":
                     is_step_verifying = ((is_returned_to_table and hands_released) or self.s04_settle_duration > 0.0)
-                    step_pct = min(100, int((self.s04_settle_duration / 1.2) * 100))
+                    step_pct = min(100, int((self.s04_settle_duration / self.S04_TARGET_S) * 100))
 
             step_telemetry.append({
                 "id": s.id,
@@ -618,7 +652,7 @@ class YoloExperimentTracker:
             "drinking": {
                 "in_progress": is_drinking_pose,
                 "hold_duration_s": round(self.drink_hold_duration, 2),
-                "target_duration_s": 2.0,
+                "target_duration_s": self.S03_TARGET_S,
                 "progress_pct": drinking_pct,
                 "water_consumed": self.water_consumed,
             },
@@ -627,8 +661,8 @@ class YoloExperimentTracker:
                 "is_returned": is_returned_to_table,
                 "hands_released": hands_released,
                 "hold_duration_s": round(self.s04_settle_duration, 2),
-                "target_duration_s": 1.2,
-                "progress_pct": min(100, int((self.s04_settle_duration / 1.2) * 100)),
+                "target_duration_s": self.S04_TARGET_S,
+                "progress_pct": min(100, int((self.s04_settle_duration / self.S04_TARGET_S) * 100)),
                 "is_complete": self.protocol_complete,
             },
             "steps": step_telemetry,
@@ -820,26 +854,26 @@ class YoloExperimentTracker:
         # Center Action Bar depending on active step
         if active_step and active_step.id == "S01":
             # Show table stability calibration status
-            calib_pct = min(1.0, self.s01_stable_duration / 1.2)
+            calib_pct = min(1.0, self.s01_stable_duration / self.S01_TARGET_S)
             bar_w = int(260 * calib_pct)
             cv2.rectangle(img, (w // 2 - 130, 62), (w // 2 + 130, 88), (20, 25, 35), -1)
             cv2.rectangle(img, (w // 2 - 130, 62), (w // 2 - 130 + bar_w, 88), (60, 200, 120), -1)
             cv2.rectangle(img, (w // 2 - 130, 62), (w // 2 + 130, 88), (80, 140, 240), 1)
-            calib_text = f"VERIFYING TABLE: {int(calib_pct * 100)}% ({self.s01_stable_duration:.1f}s / 1.2s)" if self.s01_stable_duration > 0 else "PLACE BOTTLE ON TABLE"
+            calib_text = f"VERIFYING TABLE: {int(calib_pct * 100)}% ({self.s01_stable_duration:.1f}s / {self.S01_TARGET_S:.1f}s)" if self.s01_stable_duration > 0 else "PLACE BOTTLE ON TABLE"
             cv2.putText(img, calib_text, (w // 2 - 120, 81), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1, cv2.LINE_AA)
 
         elif active_step and active_step.id == "S02":
             # Grasp and Vertical Lift Progress Bar
-            pct = min(1.0, self.s02_lift_duration / 1.2)
+            pct = min(1.0, self.s02_lift_duration / self.S02_TARGET_S)
             bar_w = int(260 * pct)
             cv2.rectangle(img, (w // 2 - 130, 62), (w // 2 + 130, 88), (20, 25, 35), -1)
-            grasp_detected = hand_contact_target or (closest_wrist_dist < 80.0)
+            grasp_detected = hand_contact_target or (closest_wrist_dist < 90.0)
             fill_color = (60, 230, 100) if (is_lifted and grasp_detected) else (40, 180, 240)
             cv2.rectangle(img, (w // 2 - 130, 62), (w // 2 - 130 + bar_w, 88), fill_color, -1)
             cv2.rectangle(img, (w // 2 - 130, 62), (w // 2 + 130, 88), (80, 140, 240), 1)
 
             if is_lifted and grasp_detected:
-                lift_label = f"VERIFYING LIFT: {int(pct * 100)}% ({self.s02_lift_duration:.1f}s / 1.2s)"
+                lift_label = f"VERIFYING LIFT: {int(pct * 100)}% ({self.s02_lift_duration:.1f}s / {self.S02_TARGET_S:.1f}s)"
             elif grasp_detected:
                 lift_label = "BOTTLE GRASPED -> LIFT OFF TABLE"
             else:
@@ -849,7 +883,7 @@ class YoloExperimentTracker:
 
         elif active_step and active_step.id == "S03":
             # Sustained Drinking Action Progress Bar
-            pct = min(1.0, self.drink_hold_duration / 2.0)
+            pct = min(1.0, self.drink_hold_duration / self.S03_TARGET_S)
             bar_w = int(260 * pct)
             cv2.rectangle(img, (w // 2 - 130, 62), (w // 2 + 130, 88), (20, 25, 35), -1)
             fill_color = (60, 230, 100) if is_drinking_pose else (40, 180, 240)
@@ -857,9 +891,9 @@ class YoloExperimentTracker:
             cv2.rectangle(img, (w // 2 - 130, 62), (w // 2 + 130, 88), (80, 140, 240), 1)
 
             if is_drinking_pose:
-                drink_label = f"VERIFYING DRINK: {int(pct * 100)}% ({self.drink_hold_duration:.1f}s / 2.0s)"
+                drink_label = f"VERIFYING DRINK: {int(pct * 100)}% ({self.drink_hold_duration:.1f}s / {self.S03_TARGET_S:.1f}s)"
             elif self.drink_hold_duration > 0:
-                drink_label = f"HOLD TO MOUTH ({self.drink_hold_duration:.1f}s / 2.0s)"
+                drink_label = f"HOLD TO MOUTH ({self.drink_hold_duration:.1f}s / {self.S03_TARGET_S:.1f}s)"
             else:
                 drink_label = "BRING BOTTLE TO MOUTH TO DRINK"
 
@@ -867,7 +901,7 @@ class YoloExperimentTracker:
 
         elif active_step and active_step.id == "S04":
             # Return to Table Surface & Hand Release Progress Bar
-            pct = min(1.0, self.s04_settle_duration / 1.2)
+            pct = min(1.0, self.s04_settle_duration / self.S04_TARGET_S)
             bar_w = int(260 * pct)
             cv2.rectangle(img, (w // 2 - 130, 62), (w // 2 + 130, 88), (20, 25, 35), -1)
             fill_color = (60, 230, 100) if (is_returned_to_table and hands_released) else (40, 180, 240)
@@ -879,7 +913,7 @@ class YoloExperimentTracker:
             elif not hands_released:
                 settle_label = "BOTTLE ON TABLE -> RELEASE HANDS"
             else:
-                settle_label = f"VERIFYING RELEASE: {int(pct * 100)}% ({self.s04_settle_duration:.1f}s / 1.2s)"
+                settle_label = f"VERIFYING RELEASE: {int(pct * 100)}% ({self.s04_settle_duration:.1f}s / {self.S04_TARGET_S:.1f}s)"
 
             cv2.putText(img, settle_label, (w // 2 - 120, 81), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1, cv2.LINE_AA)
 

@@ -137,6 +137,8 @@ class PerceptionPipeline:
         return {
             "contact": self.contact.weights_sha256,
             "detector": getattr(self.detector, "weights_sha256", "scripted"),
+            "pose": getattr(self.pose, "weights_sha256", "scripted"),
+            "motion": getattr(self.motion, "weights_sha256", "scripted"),
             "rack_layout": self.rack.layout.family,
         }
 
@@ -155,10 +157,24 @@ class PerceptionPipeline:
         detections = self._assign_tracks(detections)
         hands = list(self.hands(image)) if self.hands else []
         body = self.pose(image) if self.pose else None
-        motion = self.motion(np.zeros(1)) if self.motion else MotionState("idle", 0.0)
-
         contacts = self.smoother(self.contact(hands, detections, dt=dt))
         by_entity = self._bind(detections)
+
+        if hasattr(self.motion, "push_frame"):
+            target_det = detections[0] if detections else None
+            contact_state = contacts[0] if contacts else None
+            hand_state = hands[0] if hands else None
+            self.motion.push_frame(
+                hand=hand_state,
+                contact=contact_state,
+                target_det=target_det,
+                dt=dt,
+            )
+            motion = self.motion()
+        elif self.motion is not None:
+            motion = self.motion(np.zeros(1))
+        else:
+            motion = MotionState("idle", 0.0)
 
         return BeliefFrame(
             t_mono=round(t, 3),

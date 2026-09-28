@@ -141,10 +141,12 @@ class LiveSession:
                  props: PropMarkers | None, intrinsics: CameraIntrinsics | None = None,
                  hfov_deg: float = 70.0, run_id: str = "live",
                  log_path: str | Path | None = None, speech: SpeechQueue | None = None,
-                 pump_speech: bool = True, hands=None, fps: float = 10.0,
+                 pump_speech: bool = True, detector=None, hands=None, pose=None, motion=None,
+                 contact=None, fps: float = 10.0,
                  record: bool = True, tag_detector=None,
                  trace_path: str | Path | None = None,
-                 clips: ClipBuffer | None = None) -> None:
+                 clips: ClipBuffer | None = None,
+                 use_deep_learning: bool = False) -> None:
         #: Evidence clips around each alert, cut from recent camera frames
         #: (io/clipbuffer.py - the laptop path; the flight path cuts them from
         #: recorded segments). None records no video at all.
@@ -177,17 +179,68 @@ class LiveSession:
             bindings = {name: b for name, b in bindings.items() if name in tagged}
         self.unobserved = tuple(sorted(set(procedure.entities) - set(bindings)))
 
-        detector = (MarkerDetector(props, procedure, self.rack, tags)
-                    if props is not None else None)
-        self.pipeline = PerceptionPipeline(bindings, self.rack, detector=detector, hands=hands,
-                                           tags=tags, config=PipelineConfig(fps=fps))
+        if detector is None and props is not None:
+            detector = MarkerDetector(props, procedure, self.rack, tags)
+
+        if use_deep_learning:
+            from parikshak.perception.backends import (
+                YoloDetector,
+                YoloHands,
+                YoloPoseEstimator,
+                TcnMotionClassifier,
+            )
+            from parikshak.perception.contact import ContactHead, ContactMLP
+            from parikshak.perception.motion import MotionTCN
+
+            if detector is None:
+                try:
+                    detector = YoloDetector()
+                except Exception:
+                    pass
+            if pose is None:
+                try:
+                    pose = YoloPoseEstimator()
+                except Exception:
+                    pass
+            if hands is None and pose is not None:
+                try:
+                    hands = YoloHands(pose_model=pose)
+                except Exception:
+                    pass
+            if contact is None:
+                cw = Path("builds/contact_mlp.npz")
+                if cw.exists():
+                    try:
+                        contact = ContactHead(model=ContactMLP.load(cw))
+                    except Exception:
+                        pass
+            if motion is None:
+                mw = Path("builds/motion_tcn.npz")
+                if mw.exists():
+                    try:
+                        motion = TcnMotionClassifier(model=MotionTCN.load(mw))
+                    except Exception:
+                        pass
+
+        self.pipeline = PerceptionPipeline(
+            bindings, self.rack, detector=detector, hands=hands, pose=pose, motion=motion,
+            contact=contact, tags=tags, config=PipelineConfig(fps=fps)
+        )
         self.engine = ProcedureEngine(procedure, run_id=run_id, log_path=log_path,
                                       model_versions=self.pipeline.model_versions())
 
         caps = set(MARKER_CAPABILITIES) if props is not None else {
             "rack_frame_extrinsics", "crew_confirm"}
+        if detector is not None:
+            caps |= {"object_detection", "object_state"}
         if hands is not None:
             caps |= HAND_CAPABILITIES
+        if pose is not None:
+            caps |= {"body_pose"}
+        if motion is not None:
+            caps |= {"motion_tcn"}
+        if contact is not None and getattr(contact, "is_learned", False):
+            caps |= {"hand_object_contact"}
         self.capabilities = frozenset(caps)
         self.gaps = capability_gaps(procedure, self.capabilities)
 
