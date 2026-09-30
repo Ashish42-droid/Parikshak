@@ -10,3 +10,10 @@ traces/eval_crx2/
 runs/
 *.egg-info/
 .pytest_cache/
+
+# Local media & generated session artifacts
+iss
+recordings/*
+!recordings/.gitkeep
+reports/*
+!reports/.gitkeep

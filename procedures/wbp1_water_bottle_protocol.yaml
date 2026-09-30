@@ -37,6 +37,7 @@ requires:
     - hand_landmarks
     - hand_object_contact
     - rack_frame_extrinsics
+    - crew_confirm
   detector_classes:
     - vial
 
@@ -69,6 +70,8 @@ entities:
     label: "Mug / Cup"
     tts_name: "cup"
     confusable_with: [bottle]
+
+crew_tokens: ["water consumed"]
 
 alert_policy:
   complete_threshold: 0.85
@@ -186,9 +189,11 @@ flow:
         all:
           - { assert_true: water_consumed }
       verification:
-        all:
-          - { in_zone: { entity: bottle, zone: table_surface } }
-          - { released: { entity: bottle } }
+        any:
+          - { crew_confirmed: { token: "water consumed" } }
+          - all:
+              - { in_zone: { entity: bottle, zone: table_surface } }
+              - { released: { entity: bottle } }
       effects:
         - { assert: protocol_complete }
       duration: { min_s: 1, nominal_s: 15, sigma_s: 5, max_s: 120 }

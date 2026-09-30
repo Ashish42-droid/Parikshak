@@ -293,7 +293,27 @@ td.num { text-align: right; }
 .action-btn.secondary { background: var(--plate); color: var(--ink-2); border: 1px solid var(--rule); }
 .action-btn.danger { background: var(--crit-soft); color: var(--crit); border: 1px solid var(--crit); }
 .action-btn.warn { background: var(--warn-soft); color: var(--warn); border: 1px solid var(--warn); }
+.action-btn.off-btn { background: var(--plate); color: var(--crit); border: 1px solid rgba(240, 107, 94, 0.45); }
+.action-btn.off-btn:hover { background: var(--crit-soft); border-color: var(--crit); }
+.feed-toggle-btn { display: inline-flex; align-items: center; gap: 7px; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--rule); background: var(--plate); color: var(--ink); font-weight: 600; font-size: 12.5px; cursor: pointer; transition: all 0.2s ease; user-select: none; }
+.feed-toggle-btn:hover { background: var(--panel); border-color: var(--accent); }
+.feed-toggle-btn.active { border-color: rgba(77, 190, 138, 0.55); background: var(--ok-soft); color: var(--ok); }
+.feed-toggle-btn.inactive { border-color: rgba(240, 107, 94, 0.5); background: var(--crit-soft); color: var(--crit); }
+.feed-status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; transition: all 0.2s ease; }
+.feed-toggle-btn.active .feed-status-dot { background: var(--ok); box-shadow: 0 0 8px var(--ok); animation: pulse-feed-dot 1.8s ease-in-out infinite; }
+.feed-toggle-btn.inactive .feed-status-dot { background: var(--crit); box-shadow: none; animation: none; }
+@keyframes pulse-feed-dot { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.3); opacity: 0.65; } }
 .file-upload-input { display: none; }
+.rec-led-idle { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--ink-3); }
+.rec-led-active { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #ef4444; box-shadow: 0 0 10px #ef4444; animation: pulse-rec-dot 1.2s ease-in-out infinite; }
+.rec-live-hud { position: absolute; top: 12px; right: 12px; display: flex; align-items: center; gap: 8px; padding: 5px 12px; border-radius: 6px; background: rgba(15, 23, 42, 0.88); backdrop-filter: blur(6px); border: 1px solid rgba(239, 68, 68, 0.6); color: #fff; font-weight: 700; font-size: 12px; letter-spacing: 0.05em; z-index: 10; box-shadow: 0 2px 10px rgba(0,0,0,0.5); }
+.rec-dot-pulse { width: 9px; height: 9px; border-radius: 50%; background: #ef4444; box-shadow: 0 0 8px #ef4444; animation: pulse-rec-dot 1.2s ease-in-out infinite; }
+@keyframes pulse-rec-dot { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(1.25); } }
+.recording-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; background: var(--panel); border: 1px solid var(--grid); border-radius: 6px; }
+.recording-item:hover { border-color: var(--accent); }
+.report-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; background: var(--panel); border: 1px solid var(--grid); border-radius: 6px; transition: border-color 0.15s ease; }
+.report-item:hover { border-color: var(--accent); }
+
 
 .checklist-card { background: var(--panel); border: 1px solid var(--rule); border-radius: 12px; padding: 16px 18px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 14px; }
 .checklist-header { display: flex; justify-content: space-between; align-items: center; }
@@ -345,6 +365,7 @@ td.num { text-align: right; }
           <div class="tracker-select-group">
             <label for="t-exp-select">Active Experiment Procedure</label>
             <select id="t-exp-select">
+              <option value="BCX-1" selected>BCX-1 : Two-Box Collision in Container (Red &amp; Yellow Box)</option>
               <option value="WBP-1">WBP-1 : Water Bottle Protocol (Interactive Benchmark &amp; Demo)</option>
               <option value="CRX-2">CRX-2 : Colloid Resuspension and Cold Return (Space Mission · ISRO BAS)</option>
               <option value="CSP-1">CSP-1 : Colloid Sample Processing (Space Mission · MSG-A Rack)</option>
@@ -371,12 +392,18 @@ td.num { text-align: right; }
               <button id="mode-upload" aria-selected="false">📁 Upload Video</button>
               <button id="mode-sim" aria-selected="false">🧪 Simulation</button>
             </div>
-            <div style="display:flex; align-items:center; gap:6px;">
-              <label for="t-cam-device-select" style="font-size:11px; font-weight:700; color:var(--ink-3); text-transform:uppercase;">Webcam:</label>
-              <select id="t-cam-device-select" style="padding:4px 8px; border-radius:6px; border:1px solid var(--rule); background:var(--panel); font-size:12px; font-weight:600; max-width:240px;">
-                <option value="1">HP HD Camera (Physical · Cam 1)</option>
-                <option value="0">Camera 0 (Virtual / Aux)</option>
-              </select>
+            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+              <button id="btn-toggle-feed" class="feed-toggle-btn active" title="Toggle live camera feed ON / OFF">
+                <span class="feed-status-dot"></span>
+                <span id="feed-toggle-label">Live Feed: ACTIVE</span>
+              </button>
+              <div style="display:flex; align-items:center; gap:6px;">
+                <label for="t-cam-device-select" style="font-size:11px; font-weight:700; color:var(--ink-3); text-transform:uppercase;">Webcam:</label>
+                <select id="t-cam-device-select" style="padding:4px 8px; border-radius:6px; border:1px solid var(--rule); background:var(--panel); font-size:12px; font-weight:600; max-width:240px;">
+                  <option value="1">HP HD Camera (Physical · Cam 1)</option>
+                  <option value="0">Camera 0 (Virtual / Aux)</option>
+                </select>
+              </div>
             </div>
           </div>
 
@@ -384,9 +411,14 @@ td.num { text-align: right; }
             <img id="tracker-output-img" alt="YOLO Real-Time Vision Output" src="" style="display:none;" />
             <video id="webcam-raw-video" playsinline muted autoplay style="display:none;"></video>
             <canvas id="webcam-hidden-canvas" style="display:none;"></canvas>
+            <div id="rec-live-hud" class="rec-live-hud" style="display:none;">
+              <span class="rec-dot-pulse"></span>
+              <span>REC</span>
+              <span id="rec-live-timer" class="mono">00:00:00</span>
+            </div>
             <div class="video-overlay-msg" id="video-placeholder" style="display:flex;">
               <p style="font-size:20px; font-weight:700; margin:0; color:#fff;">Live Camera Experiment Tracker</p>
-              <p style="margin:6px 0 16px; color:#A9B5C1; max-width:480px; font-size:14px;">Hold up your water bottle and use your hands. PARIKSHAK tracks your activity in real-time with YOLOv8 &amp; OpenCV. Select camera mode to start:</p>
+              <p style="margin:6px 0 16px; color:#A9B5C1; max-width:480px; font-size:14px;">PARIKSHAK tracks your activity in real-time with YOLOv8 &amp; OpenCV. Position experiment items (Container, Red &amp; Yellow Boxes) in camera view and start camera:</p>
               <div style="display:flex; gap:12px; flex-wrap:wrap; justify-content:center;">
                 <button class="action-btn" id="btn-overlay-start" style="padding: 12px 22px; font-size: 15px; font-weight:700;">📷 Start Browser Webcam</button>
                 <button class="action-btn secondary" id="btn-overlay-direct" style="padding: 12px 22px; font-size: 15px; font-weight:700; background:rgba(255,255,255,0.12); color:#fff; border-color:rgba(255,255,255,0.25);">📹 Start Direct OpenCV Camera</button>
@@ -396,11 +428,19 @@ td.num { text-align: right; }
 
           <!-- Video Controls Toolbar -->
           <div class="tracker-toolbar">
-            <button class="action-btn" id="btn-play-pause">▶ Play Video</button>
+            <button class="action-btn" id="btn-play-pause">▶ Start Live Camera</button>
+            <button class="action-btn off-btn" id="btn-switch-off-cam" title="Power off camera sensor and release hardware">⏹ Switch Off Camera</button>
+            <button class="action-btn" id="btn-toolbar-rec" style="background:rgba(220,38,38,0.15); color:#ef4444; border:1px solid rgba(239,68,68,0.4);" title="Start / Stop recording video to local storage">
+              ⏺ Record Video
+            </button>
             <button class="action-btn secondary" id="btn-next-frame">⏭ Next Frame</button>
             <button class="action-btn secondary" id="btn-reset-tracker">↺ Reset Protocol</button>
             <input type="file" id="video-file-input" class="file-upload-input" accept="video/mp4,video/webm,video/avi" />
             <button class="action-btn secondary" id="btn-upload-trigger">📁 Choose Video</button>
+            <label style="display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:600; color:var(--ink-2); cursor:pointer; margin-left:auto; user-select:none;" title="Automatically releases and powers off camera hardware when procedure completes">
+              <input type="checkbox" id="chk-auto-cam-shutoff" checked style="cursor:pointer; accent-color:var(--accent);" />
+              <span>Auto-off camera on completion</span>
+            </label>
           </div>
 
           <!-- Error / Deviation Injection Toolbar (For Demonstration) -->
@@ -409,9 +449,11 @@ td.num { text-align: right; }
               Interactive Deviation &amp; Error Injection
             </div>
             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-              <button class="action-btn secondary" id="sim-nominal">✓ Advance Nominal Step</button>
-              <button class="action-btn warn" id="sim-skip">⚠ Inject Skip Drinking (Deviation Alert)</button>
-              <button class="action-btn danger" id="sim-wrong">✕ Inject Wrong Object (Cup Grasped Alert)</button>
+              <button class="action-btn secondary" id="sim-nominal">✓ Advance Step</button>
+              <button class="action-btn warn" id="sim-skip">⚠ Inject Skip (Deviation Alert)</button>
+              <button class="action-btn danger" id="sim-bcx-col">💥 Simulate Box Collision (BCX-1)</button>
+              <button class="action-btn warn" id="sim-bcx-skip">⚠ Skip Red Box (BCX-1)</button>
+              <button class="action-btn danger" id="sim-wrong">✕ Inject Wrong Object</button>
             </div>
           </div>
         </div>
@@ -425,7 +467,7 @@ td.num { text-align: right; }
               <span class="mono" id="t-active-sid" style="color: var(--accent); font-weight: 700;">S01</span>
             </div>
             <p id="t-active-prompt" style="font: 600 18px/1.3 var(--display); margin: 0; color: var(--ink);">
-              Locate water bottle on table surface.
+              Position and verify the outer container box in workspace view.
             </p>
 
             <!-- Real-Time Drinking Verification Progress Bar (Active during S03) -->
@@ -456,22 +498,36 @@ td.num { text-align: right; }
               </div>
             </div>
 
+            <!-- Real-Time BCX-1 Collision Verification Widget -->
+            <div id="t-collision-container" style="display:none; margin: 12px 0 6px; background: rgba(0,0,0,0.22); border: 1px solid #FF9500; border-radius: 8px; padding: 12px 14px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; margin-bottom:6px;">
+                <span id="t-collision-label" style="color:#FF9500;">💥 Box Collision Dynamics Progress</span>
+                <span id="t-collision-pct" class="mono" style="color:var(--ink); font-size:13px;">0% (0.0s / 1.0s)</span>
+              </div>
+              <div style="background: rgba(255,255,255,0.12); border-radius: 6px; height: 12px; overflow: hidden; position: relative;">
+                <div id="t-collision-bar" style="background: #FF3B30; width: 0%; height: 100%; transition: width 0.15s ease; border-radius: 6px;"></div>
+              </div>
+              <div id="t-collision-hint" style="font-size:12px; color:var(--ink-2); margin-top:6px;">
+                Bring Red Box and Yellow Box together inside container to collide.
+              </div>
+            </div>
+
             <!-- Geometry Sensor Readout -->
             <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--grid); font-size: 11px;">
               <div style="background:var(--panel-2); padding:6px 8px; border-radius:6px; text-align:center;">
-                <div style="color:var(--ink-3); font-weight:600; text-transform:uppercase; font-size:10px;">Grasp</div>
+                <div id="t-geom-l1" style="color:var(--ink-3); font-weight:600; text-transform:uppercase; font-size:10px;">Red Box</div>
                 <div id="t-geom-grasp" class="mono" style="font-weight:700; color:var(--ink); font-size:11px; margin-top:2px;">NO</div>
               </div>
               <div style="background:var(--panel-2); padding:6px 8px; border-radius:6px; text-align:center;">
-                <div style="color:var(--ink-3); font-weight:600; text-transform:uppercase; font-size:10px;">Lift</div>
-                <div id="t-geom-lift" class="mono" style="font-weight:700; color:var(--ink); font-size:11px; margin-top:2px;">0 px</div>
+                <div id="t-geom-l2" style="color:var(--ink-3); font-weight:600; text-transform:uppercase; font-size:10px;">Yellow Box</div>
+                <div id="t-geom-lift" class="mono" style="font-weight:700; color:var(--ink); font-size:11px; margin-top:2px;">NO</div>
               </div>
               <div style="background:var(--panel-2); padding:6px 8px; border-radius:6px; text-align:center;">
-                <div style="color:var(--ink-3); font-weight:600; text-transform:uppercase; font-size:10px;">Mouth Dist</div>
+                <div id="t-geom-l3" style="color:var(--ink-3); font-weight:600; text-transform:uppercase; font-size:10px;">Distance</div>
                 <div id="t-geom-mouth" class="mono" style="font-weight:700; color:var(--ink); font-size:11px; margin-top:2px;">--</div>
               </div>
               <div style="background:var(--panel-2); padding:6px 8px; border-radius:6px; text-align:center;">
-                <div style="color:var(--ink-3); font-weight:600; text-transform:uppercase; font-size:10px;">Drink Action</div>
+                <div id="t-geom-l4" style="color:var(--ink-3); font-weight:600; text-transform:uppercase; font-size:10px;">Collision</div>
                 <div id="t-geom-pose" class="mono" style="font-weight:700; color:var(--ink); font-size:11px; margin-top:2px;">NO</div>
               </div>
             </div>
@@ -479,7 +535,7 @@ td.num { text-align: right; }
             <!-- Alert Card -->
             <div class="tracker-alert-banner in-progress" id="t-alert-banner" style="margin-top: 10px;">
               <b id="t-alert-title">▶ TRACKING STEP S01</b>
-              <span id="t-alert-detail" style="font-size: 13.5px;">Place water bottle on table surface to calibrate baseline.</span>
+              <span id="t-alert-detail" style="font-size: 13.5px;">Position outer container box in workspace view.</span>
             </div>
           </div>
 
@@ -487,7 +543,7 @@ td.num { text-align: right; }
           <div class="checklist-card">
             <div class="checklist-header">
               <h3>Procedure Checklist</h3>
-              <span class="mono" id="t-checklist-progress" style="font-size: 12px; color: var(--ink-3);">0 / 4 verified</span>
+              <span class="mono" id="t-checklist-progress" style="font-size: 12px; color: var(--ink-3);">0 / 6 verified</span>
             </div>
             <div id="t-step-list">
               <!-- Steps injected dynamically -->
@@ -502,20 +558,238 @@ td.num { text-align: right; }
             </div>
             <div class="telemetry-metrics-grid">
               <div class="t-metric">
-                <div class="t-metric-label">Target Object</div>
-                <div class="t-metric-val" id="m-target">FOUND</div>
+                <div class="t-metric-label" id="m-lbl-1">Container Box</div>
+                <div class="t-metric-val" id="m-target">SEARCHING</div>
               </div>
               <div class="t-metric">
-                <div class="t-metric-label">Hand Contact</div>
-                <div class="t-metric-val" id="m-contact">NO</div>
+                <div class="t-metric-label" id="m-lbl-2">Red Box</div>
+                <div class="t-metric-val" id="m-contact">OUTSIDE</div>
               </div>
               <div class="t-metric">
-                <div class="t-metric-label">Bottle Lifted</div>
-                <div class="t-metric-val" id="m-lift">NO</div>
+                <div class="t-metric-label" id="m-lbl-3">Yellow Box</div>
+                <div class="t-metric-val" id="m-lift">OUTSIDE</div>
               </div>
               <div class="t-metric">
-                <div class="t-metric-label">Near Mouth</div>
-                <div class="t-metric-val" id="m-mouth">NO</div>
+                <div class="t-metric-label" id="m-lbl-4">Collision Dynamics</div>
+                <div class="t-metric-val" id="m-mouth">CLEAR</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Astronaut Full-Body Biometric Telemetry (17 Keypoints) -->
+          <div class="checklist-card" style="border-left: 3px solid #00f0ff; margin-top: 10px;">
+            <div class="checklist-header">
+              <h3 style="display:flex; align-items:center; gap:8px;">
+                <span id="bio-led" style="display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--ok); box-shadow:0 0 8px var(--ok);"></span>
+                Astronaut Full-Body Biometrics
+              </h3>
+              <span class="mono" id="bio-points-badge" style="font-size: 11px; padding: 2px 7px; border-radius: 4px; background: rgba(0,240,255,0.12); color: #00f0ff; font-weight:700; border: 1px solid rgba(0,240,255,0.25);">17 / 17 PTS</span>
+            </div>
+            <div class="telemetry-metrics-grid" style="margin-top:8px;">
+              <div class="t-metric">
+                <div class="t-metric-label">Posture State</div>
+                <div class="t-metric-val" id="bio-posture" style="font-size:11px; color:#00f0ff;">TRACKING</div>
+              </div>
+              <div class="t-metric">
+                <div class="t-metric-label">Spine Tilt</div>
+                <div class="t-metric-val mono" id="bio-spine" style="font-size:12px;">0.0°</div>
+              </div>
+              <div class="t-metric">
+                <div class="t-metric-label">Microgravity Drift</div>
+                <div class="t-metric-val mono" id="bio-velocity" style="font-size:12px;">0.0 px/s</div>
+              </div>
+              <div class="t-metric">
+                <div class="t-metric-label">Biometric Stability</div>
+                <div class="t-metric-val" id="bio-stability" style="font-size:11px; color:var(--ok);">STABLE</div>
+              </div>
+            </div>
+
+            <!-- Body Zones Breakdown -->
+            <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-top: 8px; font-size: 10px; text-align: center;">
+              <div style="background:var(--panel-2); padding:5px 4px; border-radius:4px; border:1px solid var(--grid);">
+                <div style="color:var(--ink-3); font-weight:600;">Head/Visor</div>
+                <div id="bio-zone-head" class="mono" style="font-weight:700; color:#00f0ff; margin-top:2px;">5 / 5</div>
+              </div>
+              <div style="background:var(--panel-2); padding:5px 4px; border-radius:4px; border:1px solid var(--grid);">
+                <div style="color:var(--ink-3); font-weight:600;">Upper Limbs</div>
+                <div id="bio-zone-arms" class="mono" style="font-weight:700; color:#40ff80; margin-top:2px;">4 / 4</div>
+              </div>
+              <div style="background:var(--panel-2); padding:5px 4px; border-radius:4px; border:1px solid var(--grid);">
+                <div style="color:var(--ink-3); font-weight:600;">Torso & Spine</div>
+                <div id="bio-zone-torso" class="mono" style="font-weight:700; color:#ffb800; margin-top:2px;">4 / 4</div>
+              </div>
+              <div style="background:var(--panel-2); padding:5px 4px; border-radius:4px; border:1px solid var(--grid);">
+                <div style="color:var(--ink-3); font-weight:600;">Foot Restraints</div>
+                <div id="bio-zone-legs" class="mono" style="font-weight:700; color:#e070ff; margin-top:2px;">4 / 4</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- System Telemetry & Video Recording Controls Card -->
+          <div class="checklist-card" id="system-telemetry-controls-card" style="border-left: 3px solid #ef4444; margin-top: 10px;">
+            <div class="checklist-header">
+              <h3 style="display:flex; align-items:center; gap:8px;">
+                <span id="rec-status-led" class="rec-led-idle"></span>
+                System Telemetry &amp; Mission Video Recording
+              </h3>
+              <span class="mono" id="rec-status-badge" style="font-size: 11px; padding: 3px 8px; border-radius: 4px; background: var(--plate); color: var(--ink-2); font-weight:700; border: 1px solid var(--rule);">STANDBY</span>
+            </div>
+
+            <!-- Primary System Telemetry Grid -->
+            <div class="telemetry-metrics-grid" style="margin-top:8px;">
+              <div class="t-metric">
+                <div class="t-metric-label">Recorder State</div>
+                <div class="t-metric-val mono" id="sys-rec-state" style="font-size:12px; color:var(--ink-2);">IDLE</div>
+              </div>
+              <div class="t-metric">
+                <div class="t-metric-label">Recording Clock</div>
+                <div class="t-metric-val mono" id="sys-rec-timer" style="font-size:13px; color:var(--accent);">00:00:00</div>
+              </div>
+              <div class="t-metric">
+                <div class="t-metric-label">Recorded Frames</div>
+                <div class="t-metric-val mono" id="sys-rec-frames" style="font-size:12px;">0 frames</div>
+              </div>
+              <div class="t-metric">
+                <div class="t-metric-label">Storage Target</div>
+                <div class="t-metric-val mono" id="sys-storage-target" style="font-size:11px; color:#4DBE8A;" title="Video automatically saved to local disk Downloads & ./recordings/ folder">LOCAL DISK</div>
+              </div>
+              <div class="t-metric">
+                <div class="t-metric-label">Inference Latency</div>
+                <div class="t-metric-val mono" id="sys-latency" style="font-size:12px; color:#7098F4;">~28 ms</div>
+              </div>
+              <div class="t-metric">
+                <div class="t-metric-label">Video Stream Rate</div>
+                <div class="t-metric-val mono" id="sys-stream-fps" style="font-size:12px;">25.0 FPS</div>
+              </div>
+            </div>
+
+            <!-- Recording Action Controls -->
+            <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:12px; padding-top:10px; border-top:1px solid var(--grid);">
+              <button class="action-btn" id="btn-start-record" style="background:#dc2626; color:#fff; border-color:#ef4444; font-weight:700;">
+                ⏺ Start Recording
+              </button>
+              <button class="action-btn secondary" id="btn-stop-record" disabled style="opacity:0.6; cursor:not-allowed;">
+                ⏹ Stop &amp; Save Video
+              </button>
+              <button class="action-btn secondary" id="btn-view-recordings" style="font-size:12.5px;">
+                📁 Local Recordings
+              </button>
+
+              <div style="display:flex; gap:14px; align-items:center; margin-left:auto; flex-wrap:wrap;">
+                <label style="display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:600; color:var(--ink-2); cursor:pointer; user-select:none;" title="Automatically start recording when experiment begins">
+                  <input type="checkbox" id="chk-auto-record" checked style="cursor:pointer; accent-color:#dc2626;" />
+                  <span>Auto-record on start</span>
+                </label>
+                <label style="display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:600; color:var(--ink-2); cursor:pointer; user-select:none;" title="Automatically finalize and save video locally upon experiment completion">
+                  <input type="checkbox" id="chk-auto-save-rec" checked style="cursor:pointer; accent-color:var(--accent);" />
+                  <span>Auto-save on completion</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- Saved Recording Toast / Banner -->
+            <div id="rec-saved-banner" style="display:none; margin-top:10px; padding:10px 14px; border-radius:8px; background:rgba(34, 197, 94, 0.12); border:1px solid rgba(34, 197, 94, 0.35); font-size:13px; color:var(--ok);">
+              <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
+                <span id="rec-saved-msg">✓ Video saved locally: PARIKSHAK_BCX1_EXP.webm (1.8 MB)</span>
+                <div style="display:flex; gap:8px;">
+                  <a id="rec-download-link" href="#" download class="action-btn" style="padding:4px 10px; font-size:12px; text-decoration:none;">📥 Download Again</a>
+                </div>
+              </div>
+            </div>
+
+            <!-- Recordings Drawer / List Container -->
+            <div id="recordings-drawer" style="display:none; margin-top:10px; padding:12px; border-radius:8px; background:var(--plate); border:1px solid var(--rule);">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <span style="font-size:12px; font-weight:700; text-transform:uppercase; color:var(--ink-3);">Saved Experiment Recordings on Local Disk (./recordings/)</span>
+                <button id="btn-close-recordings" style="background:none; border:none; color:var(--ink-3); cursor:pointer; font-weight:700; font-size:14px;">✕</button>
+              </div>
+              <div id="recordings-list" style="max-height:160px; overflow-y:auto; display:flex; flex-direction:column; gap:6px; font-size:12px;">
+                <div style="color:var(--ink-3);">No recordings saved yet.</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Mission Procedure Report & PDF Export Card -->
+          <div class="checklist-card" id="procedure-report-export-card" style="border-left: 3px solid #7098F4; margin-top: 10px;">
+            <div class="checklist-header">
+              <h3 style="display:flex; align-items:center; gap:8px;">
+                <span style="font-size:16px;">📋</span>
+                Mission Procedure Report &amp; PDF Export
+              </h3>
+              <span class="mono" id="rep-status-badge" style="font-size: 11px; padding: 3px 8px; border-radius: 4px; background: rgba(112,152,244,0.15); color: #7098F4; font-weight:700; border: 1px solid rgba(112,152,244,0.35);">AUDIT READY</span>
+            </div>
+
+            <p style="font-size:12.5px; color:var(--ink-2); margin:4px 0 10px; line-height:1.45;">
+              Generates an automated, timestamped lightweight text file (<code>.txt</code>) of conducted steps, outcomes, and vision telemetry, with a publication-grade signed <b>PDF report</b> export option.
+            </p>
+
+            <!-- Report Telemetry Summary Grid -->
+            <div class="telemetry-metrics-grid" style="margin-top:8px;">
+              <div class="t-metric">
+                <div class="t-metric-label">Procedure Status</div>
+                <div class="t-metric-val mono" id="rep-telem-status" style="font-size:12px; color:var(--accent);">STANDBY</div>
+              </div>
+              <div class="t-metric">
+                <div class="t-metric-label">Verified Steps</div>
+                <div class="t-metric-val mono" id="rep-telem-steps" style="font-size:12px;">0 / 6</div>
+              </div>
+              <div class="t-metric">
+                <div class="t-metric-label">Compliance Score</div>
+                <div class="t-metric-val mono" id="rep-telem-compliance" style="font-size:12px; color:var(--ok);">100.0%</div>
+              </div>
+              <div class="t-metric">
+                <div class="t-metric-label">SHA-256 Integrity</div>
+                <div class="t-metric-val mono" id="rep-telem-hash" style="font-size:11px; color:#4DBE8A;" title="Cryptographically signed verification record">SEALED</div>
+              </div>
+            </div>
+
+            <!-- Report Action Buttons -->
+            <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:12px; padding-top:10px; border-top:1px solid var(--grid);">
+              <button class="action-btn" id="btn-download-txt-report" style="background:#2D5BD8; color:#fff; border-color:#7098F4; font-weight:700; display:inline-flex; align-items:center; gap:6px;">
+                <span>📄</span> Download Text Report (.txt)
+              </button>
+              <button class="action-btn" id="btn-download-pdf-report" style="background:linear-gradient(135deg, #C0392B 0%, #E74C3C 100%); color:#fff; border:1px solid #FF7675; font-weight:700; display:inline-flex; align-items:center; gap:6px; box-shadow:0 2px 8px rgba(192,57,43,0.35);">
+                <span>📑</span> Export PDF Report (.pdf)
+              </button>
+              <button class="action-btn secondary" id="btn-preview-report" style="font-size:12.5px; display:inline-flex; align-items:center; gap:5px;">
+                <span>👁️</span> <span id="btn-preview-label">Preview Report</span>
+              </button>
+              <button class="action-btn secondary" id="btn-view-reports" style="font-size:12.5px; display:inline-flex; align-items:center; gap:5px; margin-left:auto;">
+                <span>📁</span> Local Reports
+              </button>
+            </div>
+
+            <!-- Report Notification Banner -->
+            <div id="rep-saved-banner" style="display:none; margin-top:10px; padding:10px 14px; border-radius:8px; background:rgba(45, 91, 216, 0.12); border:1px solid rgba(112, 152, 244, 0.4); font-size:13px; color:var(--accent);">
+              <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
+                <span id="rep-saved-msg">✓ Report generated and saved to ./reports/</span>
+                <div style="display:flex; gap:8px;">
+                  <a id="rep-banner-txt-btn" href="#" class="action-btn" style="padding:4px 10px; font-size:12px; text-decoration:none;">📄 .txt</a>
+                  <a id="rep-banner-pdf-btn" href="#" class="action-btn" style="padding:4px 10px; font-size:12px; text-decoration:none; background:#C0392B; border-color:#FF7675;">📑 .pdf</a>
+                </div>
+              </div>
+            </div>
+
+            <!-- Collapsible Report Live Text Preview -->
+            <div id="report-preview-container" style="display:none; margin-top:10px; border-radius:8px; background:#0B1015; border:1px solid #1E2832; overflow:hidden;">
+              <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 12px; background:#111920; border-bottom:1px solid #1E2832; font-size:11.5px; color:#A9B5C1;">
+                <span class="mono" style="font-weight:700; color:#7098F4;">PARIKSHAK MISSION AUDIT LOG (LIGHTWEIGHT TEXT FILE)</span>
+                <div style="display:flex; gap:8px; align-items:center;">
+                  <button id="btn-copy-report-text" style="background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.2); color:#fff; border-radius:4px; padding:2px 8px; font-size:11px; cursor:pointer;">📋 Copy</button>
+                  <button id="btn-close-report-preview" style="background:none; border:none; color:#A9B5C1; font-size:13px; cursor:pointer; font-weight:700;">✕</button>
+                </div>
+              </div>
+              <pre id="report-text-preview" style="margin:0; padding:12px; font-family:var(--mono); font-size:11px; line-height:1.45; color:#E4EAF0; max-height:260px; overflow-y:auto; white-space:pre; tab-size:2;"></pre>
+            </div>
+
+            <!-- Saved Reports Drawer Container -->
+            <div id="reports-drawer" style="display:none; margin-top:10px; padding:12px; border-radius:8px; background:var(--plate); border:1px solid var(--rule);">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <span style="font-size:12px; font-weight:700; text-transform:uppercase; color:var(--ink-3);">Saved Mission Reports on Local Disk (./reports/)</span>
+                <button id="btn-close-reports" style="background:none; border:none; color:var(--ink-3); cursor:pointer; font-weight:700; font-size:14px;">✕</button>
+              </div>
+              <div id="reports-list" style="max-height:160px; overflow-y:auto; display:flex; flex-direction:column; gap:6px; font-size:12px;">
+                <div style="color:var(--ink-3);">No reports generated yet.</div>
               </div>
             </div>
           </div>
@@ -734,6 +1008,12 @@ td.num { text-align: right; }
     trackerLoadDemoVideo: () => post("api/tracker/load_demo_video", {}),
     trackerNextVideoFrame: () => fetch("api/tracker/next_video_frame").then(json),
     trackerSimulate: (event) => post("api/tracker/simulate", { event }),
+    trackerSaveRecording: (formData) => fetch("api/tracker/save_recording", { method: "POST", body: formData }).then(json),
+    trackerRecordings: () => fetch("api/tracker/recordings").then(json),
+    trackerGenerateReport: () => post("api/tracker/generate_report", {}),
+    trackerReports: () => fetch("api/tracker/reports").then(json),
+    trackerDownloadTextUrl: "api/tracker/download_report/text",
+    trackerDownloadPdfUrl: "api/tracker/download_report/pdf",
   };
 
 
@@ -766,11 +1046,79 @@ td.num { text-align: right; }
   };
 
   let voiceOn = true;
-  function speak(text) {
+  let preferredVoice = null;
+
+  function initVoices() {
+    if (!("speechSynthesis" in window)) return;
+    const voices = window.speechSynthesis.getVoices();
+    // Prioritize natural Indian English, British aerospace, or high clarity natural voices
+    preferredVoice = voices.find(v => (v.lang || "").includes("IN") || (v.lang || "").includes("en-IN")) ||
+                     voices.find(v => (v.lang || "").includes("GB") || (v.lang || "").includes("en-GB")) ||
+                     voices.find(v => (v.name || "").includes("Natural") || (v.name || "").includes("Online")) ||
+                     voices[0];
+  }
+  if ("speechSynthesis" in window) {
+    window.speechSynthesis.onvoiceschanged = initVoices;
+    initVoices();
+  }
+
+  function playAerospaceChime(type = "alert") {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      const now = ctx.currentTime;
+      if (type === "alert") {
+        // High-clarity 2-tone aerospace alert chime (880 Hz -> 1760 Hz)
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(880, now);
+        osc.frequency.exponentialRampToValueAtTime(1760, now + 0.12);
+        gain.gain.setValueAtTime(0.28, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.22);
+        osc.start(now);
+        osc.stop(now + 0.22);
+      } else {
+        // Pleasant step confirmation chime (523 Hz -> 659 Hz)
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(523, now);
+        osc.frequency.exponentialRampToValueAtTime(659, now + 0.10);
+        gain.gain.setValueAtTime(0.20, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.18);
+        osc.start(now);
+        osc.stop(now + 0.18);
+      }
+    } catch (e) {
+      console.warn("Chime error:", e);
+    }
+  }
+
+  function speak(text, opts = {}) {
     if (!voiceOn || !text || !("speechSynthesis" in window)) return;
+    window.speechSynthesis.cancel(); // cancel any stale queued speech
+
+    const isAlert = Boolean(opts.isAlert || opts.alert);
+    if (isAlert) {
+      playAerospaceChime("alert");
+    }
+
     const u = new SpeechSynthesisUtterance(text);
-    u.rate = 1.05;
-    window.speechSynthesis.speak(u);
+    // Voice modulation: Pitch and Rate features
+    // Alerts use raised urgent pitch (1.16); guidance uses calm authoritative flight pitch (0.94)
+    u.pitch = opts.pitch !== undefined ? opts.pitch : (isAlert ? 1.16 : 0.94);
+    // Deliberate measured rate (0.92) for audible acoustic clarity, avoiding rushed monotone
+    u.rate = opts.rate !== undefined ? opts.rate : 0.92;
+    u.volume = 1.0;
+    if (preferredVoice) u.voice = preferredVoice;
+
+    if (isAlert) {
+      setTimeout(() => window.speechSynthesis.speak(u), 140);
+    } else {
+      window.speechSynthesis.speak(u);
+    }
   }
 
   // ---- shared drawing ---------------------------------------------------
@@ -1053,7 +1401,7 @@ td.num { text-align: right; }
     const lastAlert = [...state.events].reverse().find((e) => e.type === "alert");
     if (lastAlert) {
       const key = `${lastAlert.t}:${lastAlert.step}`;
-      if (key !== G.spokenAlert) { G.spokenAlert = key; speak(lastAlert.text || lastAlert.reason); }
+      if (key !== G.spokenAlert) { G.spokenAlert = key; speak(lastAlert.text || lastAlert.reason, { isAlert: true, pitch: 1.18, rate: 0.90 }); }
     }
 
     const acts = $("#g-acts");
@@ -1401,9 +1749,15 @@ td.num { text-align: right; }
   let directCamInterval = null;
   let webcamStream = null;
   let lastSpokenTts = "";
+  let lastAlertTimestamp = 0;
   let lastStepSpoken = "";
   let protocolDoneSpoken = false;
   let isSendingFrame = false;
+  let isCameraFeedOff = false;
+  let feedAutoShutoffTimer = null;
+  let switchOffCameraFeed = null;
+  let switchOnCameraFeed = null;
+  let toggleCameraFeed = null;
 
   function initTracker() {
     const sel = $("#t-exp-select");
@@ -1412,6 +1766,565 @@ td.num { text-align: right; }
     const rawVideo = $("#webcam-raw-video");
     const hiddenCanvas = $("#webcam-hidden-canvas");
     const playBtn = $("#btn-play-pause");
+    const feedToggleBtn = $("#btn-toggle-feed");
+    const feedLabel = $("#feed-toggle-label");
+    const offCamBtn = $("#btn-switch-off-cam");
+
+    // Mission Video Recording & System Telemetry Elements
+    const recHud = $("#rec-live-hud");
+    const recTimerLive = $("#rec-live-timer");
+    const recBtnToolbar = $("#btn-toolbar-rec");
+    const recLed = $("#rec-status-led");
+    const recBadge = $("#rec-status-badge");
+    const recStateText = $("#sys-rec-state");
+    const recClockSys = $("#sys-rec-timer");
+    const recFramesSys = $("#sys-rec-frames");
+    const startRecBtn = $("#btn-start-record");
+    const stopRecBtn = $("#btn-stop-record");
+    const viewRecBtn = $("#btn-view-recordings");
+    const closeRecBtn = $("#btn-close-recordings");
+    const recDrawer = $("#recordings-drawer");
+    const recList = $("#recordings-list");
+    const recSavedBanner = $("#rec-saved-banner");
+    const recSavedMsg = $("#rec-saved-msg");
+    const recDownloadLink = $("#rec-download-link");
+    const chkAutoRec = $("#chk-auto-record");
+    const chkAutoSaveRec = $("#chk-auto-save-rec");
+
+    // Mission Procedure Report & PDF Export Elements
+    const btnDownloadTxt = $("#btn-download-txt-report");
+    const btnDownloadPdf = $("#btn-download-pdf-report");
+    const btnPreviewReport = $("#btn-preview-report");
+    const btnViewReports = $("#btn-view-reports");
+    const btnCloseReports = $("#btn-close-reports");
+    const btnClosePreview = $("#btn-close-report-preview");
+    const btnCopyReport = $("#btn-copy-report-text");
+    const repPreviewBox = $("#report-preview-container");
+    const repTextPreview = $("#report-text-preview");
+    const repPreviewLabel = $("#btn-preview-label");
+    const reportsDrawer = $("#reports-drawer");
+    const reportsList = $("#reports-list");
+    const repSavedBanner = $("#rep-saved-banner");
+    const repSavedMsg = $("#rep-saved-msg");
+    const repBannerTxtBtn = $("#rep-banner-txt-btn");
+    const repBannerPdfBtn = $("#rep-banner-pdf-btn");
+    const repTelemStatus = $("#rep-telem-status");
+    const repTelemSteps = $("#rep-telem-steps");
+    const repTelemCompliance = $("#rep-telem-compliance");
+    const repTelemHash = $("#rep-telem-hash");
+
+    let latestReportData = null;
+
+    let isRecordingActive = false;
+    let mediaRecorder = null;
+    let recordedChunks = [];
+    let recStartTime = null;
+    let recTimerInterval = null;
+    let recFrameCount = 0;
+    let recCanvas = null;
+    let recCtx = null;
+    let recStreamAnimFrame = null;
+
+    function renderFrameToRecCanvas() {
+      if (!recCanvas || !recCtx) return;
+      if (imgOut && imgOut.style.display !== "none" && imgOut.naturalWidth > 0) {
+        try {
+          recCtx.drawImage(imgOut, 0, 0, recCanvas.width, recCanvas.height);
+          recFrameCount++;
+          if (recFramesSys) recFramesSys.textContent = `${recFrameCount} frames`;
+          return;
+        } catch (e) {}
+      }
+      if (rawVideo && rawVideo.style.display !== "none" && rawVideo.videoWidth > 0) {
+        try {
+          recCtx.drawImage(rawVideo, 0, 0, recCanvas.width, recCanvas.height);
+          recFrameCount++;
+          if (recFramesSys) recFramesSys.textContent = `${recFrameCount} frames`;
+          return;
+        } catch (e) {}
+      }
+    }
+
+    function formatRecClock(ms) {
+      const totalSec = Math.floor(ms / 1000);
+      const hrs = String(Math.floor(totalSec / 3600)).padStart(2, "0");
+      const mins = String(Math.floor((totalSec % 3600) / 60)).padStart(2, "0");
+      const secs = String(totalSec % 60).padStart(2, "0");
+      return `${hrs}:${mins}:${secs}`;
+    }
+
+    function updateRecordingClock() {
+      if (!isRecordingActive || !recStartTime) return;
+      const elapsed = Date.now() - recStartTime;
+      const str = formatRecClock(elapsed);
+      if (recTimerLive) recTimerLive.textContent = str;
+      if (recClockSys) recClockSys.textContent = str;
+    }
+
+    function updateRecordingUI(active) {
+      if (active) {
+        if (recHud) recHud.style.display = "flex";
+        if (recLed) recLed.className = "rec-led-active";
+        if (recBadge) {
+          recBadge.textContent = "RECORDING";
+          recBadge.style.background = "rgba(239, 68, 68, 0.2)";
+          recBadge.style.color = "#ef4444";
+          recBadge.style.borderColor = "rgba(239, 68, 68, 0.5)";
+        }
+        if (recStateText) {
+          recStateText.textContent = "RECORDING (ACTIVE)";
+          recStateText.style.color = "#ef4444";
+        }
+        if (startRecBtn) {
+          startRecBtn.disabled = true;
+          startRecBtn.style.opacity = "0.5";
+          startRecBtn.style.cursor = "not-allowed";
+        }
+        if (stopRecBtn) {
+          stopRecBtn.disabled = false;
+          stopRecBtn.style.opacity = "1";
+          stopRecBtn.style.cursor = "pointer";
+          stopRecBtn.className = "action-btn danger";
+        }
+        if (recBtnToolbar) {
+          recBtnToolbar.innerHTML = '<span class="rec-dot-pulse"></span> ⏹ Stop Rec';
+          recBtnToolbar.style.background = "rgba(239,68,68,0.25)";
+          recBtnToolbar.style.borderColor = "#ef4444";
+          recBtnToolbar.style.color = "#fff";
+        }
+      } else {
+        if (recHud) recHud.style.display = "none";
+        if (recLed) recLed.className = "rec-led-idle";
+        if (recBadge) {
+          recBadge.textContent = "STANDBY";
+          recBadge.style.background = "var(--plate)";
+          recBadge.style.color = "var(--ink-2)";
+          recBadge.style.borderColor = "var(--rule)";
+        }
+        if (recStateText) {
+          recStateText.textContent = "IDLE";
+          recStateText.style.color = "var(--ink-2)";
+        }
+        if (startRecBtn) {
+          startRecBtn.disabled = false;
+          startRecBtn.style.opacity = "1";
+          startRecBtn.style.cursor = "pointer";
+        }
+        if (stopRecBtn) {
+          stopRecBtn.disabled = true;
+          stopRecBtn.style.opacity = "0.6";
+          stopRecBtn.style.cursor = "not-allowed";
+          stopRecBtn.className = "action-btn secondary";
+        }
+        if (recBtnToolbar) {
+          recBtnToolbar.innerHTML = '⏺ Record Video';
+          recBtnToolbar.style.background = "rgba(220,38,38,0.15)";
+          recBtnToolbar.style.borderColor = "rgba(239,68,68,0.4)";
+          recBtnToolbar.style.color = "#ef4444";
+        }
+      }
+    }
+
+    function startExperimentRecording() {
+      if (isRecordingActive) return;
+      try {
+        if (!recCanvas) {
+          recCanvas = document.createElement("canvas");
+          recCanvas.width = 640;
+          recCanvas.height = 480;
+        }
+        recCtx = recCanvas.getContext("2d");
+        recCtx.fillStyle = "#0A0F14";
+        recCtx.fillRect(0, 0, 640, 480);
+        renderFrameToRecCanvas();
+
+        const stream = recCanvas.captureStream(25);
+        let options = { mimeType: "video/webm" };
+        if (typeof MediaRecorder.isTypeSupported === "function") {
+          if (MediaRecorder.isTypeSupported("video/webm;codecs=vp9")) {
+            options = { mimeType: "video/webm;codecs=vp9" };
+          } else if (MediaRecorder.isTypeSupported("video/webm;codecs=vp8")) {
+            options = { mimeType: "video/webm;codecs=vp8" };
+          }
+        }
+
+        recordedChunks = [];
+        mediaRecorder = new MediaRecorder(stream, options);
+
+        mediaRecorder.ondataavailable = (event) => {
+          if (event.data && event.data.size > 0) {
+            recordedChunks.push(event.data);
+          }
+        };
+
+        mediaRecorder.onstop = () => {
+          const mime = (mediaRecorder && mediaRecorder.mimeType) ? mediaRecorder.mimeType : "video/webm";
+          const blob = new Blob(recordedChunks, { type: mime });
+          recordedChunks = [];
+          finalizeAndSaveRecording(blob);
+        };
+
+        mediaRecorder.start(250);
+        isRecordingActive = true;
+        recFrameCount = 0;
+        recStartTime = Date.now();
+        updateRecordingUI(true);
+
+        if (recTimerInterval) clearInterval(recTimerInterval);
+        recTimerInterval = setInterval(updateRecordingClock, 250);
+
+        if (recStreamAnimFrame) clearInterval(recStreamAnimFrame);
+        recStreamAnimFrame = setInterval(() => {
+          if (isRecordingActive) renderFrameToRecCanvas();
+        }, 40);
+
+        speak("Mission video recording initiated. Recording experiment to local storage.", { pitch: 0.95, rate: 0.95 });
+      } catch (err) {
+        console.error("Failed to start MediaRecorder:", err);
+        alert("Could not start video recording: " + err.message);
+      }
+    }
+
+    function stopExperimentRecording() {
+      if (!isRecordingActive || !mediaRecorder) return;
+      try {
+        isRecordingActive = false;
+        if (recTimerInterval) {
+          clearInterval(recTimerInterval);
+          recTimerInterval = null;
+        }
+        if (recStreamAnimFrame) {
+          clearInterval(recStreamAnimFrame);
+          recStreamAnimFrame = null;
+        }
+        updateRecordingUI(false);
+        if (mediaRecorder.state !== "inactive") {
+          mediaRecorder.stop();
+        }
+        speak("Video recording stopped. Saving experiment video to local storage.", { pitch: 0.95, rate: 0.95 });
+      } catch (err) {
+        console.warn("Stop recording error:", err);
+        updateRecordingUI(false);
+      }
+    }
+
+    function toggleExperimentRecording() {
+      if (isRecordingActive) {
+        stopExperimentRecording();
+      } else {
+        startExperimentRecording();
+      }
+    }
+
+    async function finalizeAndSaveRecording(blob) {
+      if (!blob || blob.size === 0) {
+        console.warn("Recorded blob is empty, skipping save.");
+        return;
+      }
+      const activeExp = sel ? (sel.value || "EXP") : "EXP";
+      const now = new Date();
+      const pad = (n) => String(n).padStart(2, "0");
+      const timeStr = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+      const filename = `PARIKSHAK_${activeExp}_${timeStr}.webm`;
+      const sizeMb = (blob.size / (1024 * 1024)).toFixed(2);
+
+      // 1. Direct local disk download to user's computer via browser
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.style.display = "none";
+      a.href = blobUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        try { document.body.removeChild(a); } catch (e) {}
+      }, 1000);
+
+      // 2. Persist to host ./recordings/ directory via API
+      const formData = new FormData();
+      formData.append("file", blob, filename);
+      try {
+        const res = await api.trackerSaveRecording(formData);
+        showRecordingSavedBanner(res.filename || filename, res.size_mb || sizeMb, res.url || blobUrl, res.filepath);
+        loadAndShowRecordingsList();
+      } catch (err) {
+        console.warn("Server save error (saved locally via browser):", err);
+        showRecordingSavedBanner(filename, sizeMb, blobUrl, "Browser Downloads");
+      }
+    }
+
+    function showRecordingSavedBanner(filename, sizeMb, url, filepath) {
+      if (recSavedBanner) {
+        recSavedBanner.style.display = "block";
+        if (recSavedMsg) {
+          recSavedMsg.innerHTML = `✓ Video saved locally: <b>${filename}</b> (${sizeMb} MB) <span style="font-size:11px; opacity:0.8;">[Saved to: ${filepath || "Local Disk"}]</span>`;
+        }
+        if (recDownloadLink) {
+          recDownloadLink.href = url;
+          recDownloadLink.download = filename;
+        }
+      }
+    }
+
+    async function loadAndShowRecordingsList() {
+      if (!recList) return;
+      try {
+        const data = await api.trackerRecordings();
+        recList.replaceChildren();
+        if (!data.recordings || data.recordings.length === 0) {
+          recList.innerHTML = '<div style="color:var(--ink-3); padding:6px 0;">No saved recordings yet.</div>';
+          return;
+        }
+        for (const rec of data.recordings) {
+          const item = node("div", { class: "recording-item" });
+          const info = node("div", {});
+          const name = node("div", { style: "font-weight:600; color:var(--ink);" }, rec.name);
+          const meta = node("div", { style: "font-size:11px; color:var(--ink-3); margin-top:2px;" }, `${rec.size_mb} MB · ${new Date(rec.mtime * 1000).toLocaleTimeString()}`);
+          info.appendChild(name);
+          info.appendChild(meta);
+          item.appendChild(info);
+
+          const dl = node("a", {
+            href: rec.url,
+            download: rec.name,
+            class: "action-btn secondary",
+            style: "padding:3px 8px; font-size:11.5px; text-decoration:none;"
+          }, "📥 Download");
+          item.appendChild(dl);
+          recList.appendChild(item);
+        }
+      } catch (e) {
+        console.warn("Could not load recordings:", e);
+      }
+    }
+
+    async function generateProcedureReport(autoPromptDownload = null) {
+      try {
+        if (repPreviewLabel) repPreviewLabel.textContent = "Generating…";
+        const data = await api.trackerGenerateReport();
+        latestReportData = data;
+        if (repPreviewLabel) repPreviewLabel.textContent = "Preview Report";
+
+        if (repTextPreview && data.preview_text) {
+          repTextPreview.textContent = data.preview_text;
+        }
+
+        if (repSavedBanner) {
+          repSavedBanner.style.display = "block";
+          if (repSavedMsg) {
+            repSavedMsg.innerHTML = `✓ Report generated: <b>${data.text_filename || "report.txt"}</b> &amp; <b>${data.pdf_filename || "report.pdf"}</b> <span style="font-size:11px; opacity:0.8;">[Saved to ./reports/]</span>`;
+          }
+          if (repBannerTxtBtn) {
+            repBannerTxtBtn.href = data.text_url || "/api/tracker/download_report/text";
+            repBannerTxtBtn.download = data.text_filename || "PARIKSHAK_REPORT.txt";
+          }
+          if (repBannerPdfBtn) {
+            repBannerPdfBtn.href = data.pdf_url || "/api/tracker/download_report/pdf";
+            repBannerPdfBtn.download = data.pdf_filename || "PARIKSHAK_REPORT.pdf";
+          }
+        }
+
+        if (repTelemHash && data.integrity_hash) {
+          repTelemHash.textContent = "SEALED · " + data.integrity_hash.slice(0, 8);
+          repTelemHash.title = "SHA-256: " + data.integrity_hash;
+        }
+
+        if (autoPromptDownload === "text") {
+          const a = document.createElement("a");
+          a.style.display = "none";
+          a.href = data.text_url || "/api/tracker/download_report/text";
+          a.download = data.text_filename || "PARIKSHAK_REPORT.txt";
+          document.body.appendChild(a);
+          a.click();
+          setTimeout(() => { try { document.body.removeChild(a); } catch (e) {} }, 1000);
+        } else if (autoPromptDownload === "pdf") {
+          const a = document.createElement("a");
+          a.style.display = "none";
+          a.href = data.pdf_url || "/api/tracker/download_report/pdf";
+          a.download = data.pdf_filename || "PARIKSHAK_REPORT.pdf";
+          document.body.appendChild(a);
+          a.click();
+          setTimeout(() => { try { document.body.removeChild(a); } catch (e) {} }, 1000);
+        }
+
+        return data;
+      } catch (err) {
+        console.error("Failed to generate report:", err);
+        if (repPreviewLabel) repPreviewLabel.textContent = "Preview Report";
+        alert("Failed to generate procedure report: " + err.message);
+      }
+    }
+
+    async function loadAndShowReportsList() {
+      if (!reportsList) return;
+      reportsList.innerHTML = "<div style='color:var(--ink-3);'>Loading saved reports…</div>";
+      try {
+        const res = await api.trackerReports();
+        const files = (res && res.reports) ? res.reports : [];
+        if (files.length === 0) {
+          reportsList.innerHTML = "<div style='color:var(--ink-3);'>No reports saved yet. Click 'Generate &amp; Download' above.</div>";
+          return;
+        }
+        reportsList.replaceChildren();
+        for (const f of files) {
+          const item = node("div", { class: "report-item" });
+          const icon = f.is_pdf ? "📑" : "📄";
+          const tag = f.is_pdf ? "PDF Report" : "Text Audit Log";
+          const tagColor = f.is_pdf ? "#C0392B" : "#2D5BD8";
+          item.innerHTML = `
+            <div style="display:flex; align-items:center; gap:8px; min-width:0;">
+              <span>${icon}</span>
+              <div style="min-width:0;">
+                <div style="font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:280px;" title="${f.name}">${f.name}</div>
+                <div style="font-size:11px; color:var(--ink-3); display:flex; gap:8px;">
+                  <span style="color:${tagColor}; font-weight:700;">${tag}</span>
+                  <span>${f.size_kb} KB</span>
+                  <span title="${f.filepath}">Local Disk</span>
+                </div>
+              </div>
+            </div>
+            <a href="${f.url}" download="${f.name}" class="action-btn secondary" style="padding:3px 8px; font-size:11.5px; text-decoration:none;">📥 Download</a>
+          `;
+          reportsList.appendChild(item);
+        }
+      } catch (err) {
+        reportsList.innerHTML = `<div style="color:var(--crit);">Failed to load reports: ${err.message}</div>`;
+      }
+    }
+
+    function syncFeedToggleUI(isActive) {
+      isCameraFeedOff = !isActive;
+      if (feedToggleBtn) {
+        feedToggleBtn.className = "feed-toggle-btn " + (isActive ? "active" : "inactive");
+      }
+      if (feedLabel) {
+        feedLabel.textContent = isActive ? "Live Feed: ACTIVE" : "Live Feed: OFF";
+      }
+      if (offCamBtn) {
+        offCamBtn.textContent = isActive ? "⏹ Switch Off Camera" : "▶ Switch On Camera";
+        offCamBtn.className = "action-btn " + (isActive ? "off-btn" : "");
+      }
+    }
+
+    switchOffCameraFeed = function(reason = "manual") {
+      isCameraFeedOff = true;
+      trackerPlaying = false;
+      isSendingFrame = false;
+      isFetchingDirectFrame = false;
+
+      if (feedAutoShutoffTimer) {
+        clearTimeout(feedAutoShutoffTimer);
+        feedAutoShutoffTimer = null;
+      }
+      if (trackerInterval) {
+        clearInterval(trackerInterval);
+        trackerInterval = null;
+      }
+      if (directCamInterval) {
+        clearInterval(directCamInterval);
+        directCamInterval = null;
+      }
+
+      // 1. Physically stop all browser webcam tracks so camera sensor & LED turn OFF
+      if (webcamStream) {
+        try {
+          webcamStream.getTracks().forEach(t => t.stop());
+        } catch (e) {
+          console.warn("Track stop error:", e);
+        }
+        webcamStream = null;
+      }
+      if (rawVideo) {
+        try {
+          rawVideo.pause();
+          rawVideo.srcObject = null;
+        } catch (e) {}
+        rawVideo.style.display = "none";
+      }
+
+      // 2. Release host OpenCV VideoCapture camera device
+      api.trackerStopCamera().catch(() => {});
+
+      imgOut.style.display = "none";
+      syncFeedToggleUI(false);
+      playBtn.textContent = trackerMode === "direct-cam" ? "▶ Start OpenCV Camera" : "▶ Start Live Camera";
+
+      // 3. Render appropriate standby overlay
+      videoPlaceholder.style.display = "flex";
+      if (reason === "completed") {
+        videoPlaceholder.innerHTML = `
+          <div style="display:flex; flex-direction:column; align-items:center; gap:12px; max-width:540px; padding:24px 20px;">
+            <div style="font-size:38px; line-height:1;">🎉</div>
+            <p style="font-size:21px; font-weight:800; margin:0; color:#22c55e; letter-spacing:-0.01em;">Experiment Completed &amp; Verified Nominal</p>
+            <p style="margin:2px 0 10px; color:#CAD5E2; font-size:14px; line-height:1.45;">
+              All protocol steps verified nominal. Camera feed and hardware capture tracks have been safely <b>switched off</b> to preserve spaceflight power and hardware.
+            </p>
+            <div style="display:flex; gap:10px; flex-wrap:wrap; justify-content:center; margin-top:4px;">
+              <button class="action-btn" id="btn-comp-txt-rep" style="padding:9px 16px; font-size:13px; font-weight:700; background:#2D5BD8; border-color:#7098F4;">📄 Download Text Report (.txt)</button>
+              <button class="action-btn" id="btn-comp-pdf-rep" style="padding:9px 16px; font-size:13px; font-weight:700; background:linear-gradient(135deg, #C0392B 0%, #E74C3C 100%); border-color:#FF7675; box-shadow:0 2px 8px rgba(192,57,43,0.35);">📑 Export PDF Report (.pdf)</button>
+            </div>
+            <div style="display:flex; gap:12px; flex-wrap:wrap; justify-content:center; margin-top:6px;">
+              <button class="action-btn secondary" id="btn-reopen-camera" style="padding:8px 16px; font-size:13px; font-weight:600;">▶ Switch On Live Feed</button>
+              <button class="action-btn secondary" id="btn-restart-run" style="padding:8px 16px; font-size:13px; font-weight:600;">↺ Reset &amp; Start New Run</button>
+            </div>
+          </div>
+        `;
+      } else {
+        videoPlaceholder.innerHTML = `
+          <div style="display:flex; flex-direction:column; align-items:center; gap:10px; max-width:500px; padding:24px 20px;">
+            <div style="font-size:34px; line-height:1;">⏹</div>
+            <p style="font-size:19px; font-weight:700; margin:0; color:#fff;">Live Camera Feed Switched Off</p>
+            <p style="margin:2px 0 12px; color:#A9B5C1; font-size:13.5px; line-height:1.45;">
+              Camera sensor and hardware video tracks are currently <b>released and powered down</b>.
+            </p>
+            <div style="display:flex; gap:12px; flex-wrap:wrap; justify-content:center;">
+              <button class="action-btn" id="btn-turn-on-feed" style="padding:10px 20px; font-size:14px; font-weight:700;">▶ Switch On Live Feed</button>
+              <button class="action-btn secondary" id="btn-turn-on-direct" style="padding:10px 18px; font-size:14px;">📹 Direct OpenCV Cam</button>
+            </div>
+          </div>
+        `;
+      }
+    };
+
+    switchOnCameraFeed = function() {
+      isCameraFeedOff = false;
+      syncFeedToggleUI(true);
+      if (trackerMode === "direct-cam") {
+        startDirectCamMode();
+      } else if (trackerMode === "demo-vid") {
+        startVideoPlaybackLoop();
+      } else {
+        startWebcamMode();
+      }
+    };
+
+    toggleCameraFeed = function() {
+      if (trackerPlaying && !isCameraFeedOff) {
+        switchOffCameraFeed("manual");
+        speak("Camera feed switched off.", { pitch: 0.95, rate: 0.95 });
+      } else {
+        switchOnCameraFeed();
+      }
+    };
+
+    async function resetAndRestartRun() {
+      lastStepSpoken = "";
+      lastSpokenTts = "";
+      lastAlertTimestamp = 0;
+      protocolDoneSpoken = false;
+      if (feedAutoShutoffTimer) {
+        clearTimeout(feedAutoShutoffTimer);
+        feedAutoShutoffTimer = null;
+      }
+      const telem = await api.trackerReset();
+      updateTrackerUI(telem);
+      switchOnCameraFeed();
+      if (telem && telem.experiment_id === "BCX-1") {
+        speak("New run initiated. Active step S01: Please position the outer container box in workspace view.", { isAlert: false, pitch: 0.95, rate: 0.92 });
+      } else {
+        speak("New run initiated. Active step S01: Please place your water bottle on table in view.", { isAlert: false, pitch: 0.95, rate: 0.92 });
+      }
+    }
 
     const modes = [
       { id: "mode-webcam", mode: "webcam" },
@@ -1433,7 +2346,7 @@ td.num { text-align: right; }
         videoPlaceholder.style.display = "flex";
         videoPlaceholder.innerHTML = `
           <p style="font-size:20px; font-weight:700; margin:0; color:#fff;">Live Camera Experiment Tracker</p>
-          <p style="margin:6px 0 16px; color:#A9B5C1; max-width:480px; font-size:14px;">Hold up your water bottle and use your hands. PARIKSHAK tracks your activity in real-time with YOLOv8 &amp; OpenCV. Select camera mode to start:</p>
+          <p style="margin:6px 0 16px; color:#A9B5C1; max-width:480px; font-size:14px;">PARIKSHAK tracks your activity in real-time with YOLOv8 &amp; OpenCV. Position your experiment items in camera view and select camera mode to start:</p>
           <div style="display:flex; gap:12px; flex-wrap:wrap; justify-content:center;">
             <button class="action-btn" id="btn-overlay-start" style="padding: 12px 22px; font-size: 15px; font-weight:700;">📷 Start Browser Webcam</button>
             <button class="action-btn secondary" id="btn-overlay-direct" style="padding: 12px 22px; font-size: 15px; font-weight:700; background:rgba(255,255,255,0.12); color:#fff; border-color:rgba(255,255,255,0.25);">📹 Start Direct OpenCV Camera</button>
@@ -1483,6 +2396,90 @@ td.num { text-align: right; }
       if (btn) btn.addEventListener("click", () => setTrackerMode(item.mode));
     }
 
+    if (feedToggleBtn) {
+      feedToggleBtn.addEventListener("click", () => toggleCameraFeed());
+    }
+    if (offCamBtn) {
+      offCamBtn.addEventListener("click", () => toggleCameraFeed());
+    }
+
+    if (startRecBtn) {
+      startRecBtn.addEventListener("click", () => startExperimentRecording());
+    }
+    if (stopRecBtn) {
+      stopRecBtn.addEventListener("click", () => stopExperimentRecording());
+    }
+    if (recBtnToolbar) {
+      recBtnToolbar.addEventListener("click", () => toggleExperimentRecording());
+    }
+    if (viewRecBtn) {
+      viewRecBtn.addEventListener("click", () => {
+        if (recDrawer) {
+          const isOpen = recDrawer.style.display !== "none";
+          recDrawer.style.display = isOpen ? "none" : "block";
+          if (!isOpen) loadAndShowRecordingsList();
+        }
+      });
+    }
+    if (closeRecBtn) {
+      closeRecBtn.addEventListener("click", () => {
+        if (recDrawer) recDrawer.style.display = "none";
+      });
+    }
+
+    if (btnDownloadTxt) {
+      btnDownloadTxt.addEventListener("click", () => generateProcedureReport("text"));
+    }
+    if (btnDownloadPdf) {
+      btnDownloadPdf.addEventListener("click", () => generateProcedureReport("pdf"));
+    }
+    if (btnPreviewReport) {
+      btnPreviewReport.addEventListener("click", async () => {
+        if (!repPreviewBox) return;
+        const isHidden = repPreviewBox.style.display === "none";
+        if (isHidden) {
+          if (!latestReportData) {
+            await generateProcedureReport();
+          }
+          repPreviewBox.style.display = "block";
+          if (repPreviewLabel) repPreviewLabel.textContent = "Hide Preview";
+        } else {
+          repPreviewBox.style.display = "none";
+          if (repPreviewLabel) repPreviewLabel.textContent = "Preview Report";
+        }
+      });
+    }
+    if (btnClosePreview) {
+      btnClosePreview.addEventListener("click", () => {
+        if (repPreviewBox) repPreviewBox.style.display = "none";
+        if (repPreviewLabel) repPreviewLabel.textContent = "Preview Report";
+      });
+    }
+    if (btnCopyReport) {
+      btnCopyReport.addEventListener("click", () => {
+        if (repTextPreview && repTextPreview.textContent) {
+          navigator.clipboard.writeText(repTextPreview.textContent).then(() => {
+            btnCopyReport.textContent = "✓ Copied!";
+            setTimeout(() => { btnCopyReport.textContent = "📋 Copy"; }, 1500);
+          });
+        }
+      });
+    }
+    if (btnViewReports) {
+      btnViewReports.addEventListener("click", () => {
+        if (reportsDrawer) {
+          const isOpen = reportsDrawer.style.display !== "none";
+          reportsDrawer.style.display = isOpen ? "none" : "block";
+          if (!isOpen) loadAndShowReportsList();
+        }
+      });
+    }
+    if (btnCloseReports) {
+      btnCloseReports.addEventListener("click", () => {
+        if (reportsDrawer) reportsDrawer.style.display = "none";
+      });
+    }
+
     $("#video-container").addEventListener("click", (e) => {
       if (e.target.closest("#btn-overlay-start")) {
         startWebcamMode();
@@ -1494,6 +2491,16 @@ td.num { text-align: right; }
         startDirectCamMode();
       } else if (e.target.closest("#btn-switch-demo")) {
         setTrackerMode("demo-vid");
+      } else if (e.target.closest("#btn-reopen-camera") || e.target.closest("#btn-turn-on-feed")) {
+        switchOnCameraFeed();
+      } else if (e.target.closest("#btn-turn-on-direct")) {
+        startDirectCamMode();
+      } else if (e.target.closest("#btn-restart-run")) {
+        resetAndRestartRun();
+      } else if (e.target.closest("#btn-comp-txt-rep")) {
+        generateProcedureReport("text");
+      } else if (e.target.closest("#btn-comp-pdf-rep")) {
+        generateProcedureReport("pdf");
       }
     });
 
@@ -1521,10 +2528,20 @@ td.num { text-align: right; }
 
     $("#btn-reset-tracker").addEventListener("click", async () => {
       lastStepSpoken = "";
+      lastSpokenTts = "";
+      lastAlertTimestamp = 0;
       protocolDoneSpoken = false;
+      if (feedAutoShutoffTimer) {
+        clearTimeout(feedAutoShutoffTimer);
+        feedAutoShutoffTimer = null;
+      }
       const telem = await api.trackerReset();
       updateTrackerUI(telem);
-      speak("Protocol reset. Active step S01: Please place your water bottle on table in view.");
+      if (telem && telem.experiment_id === "BCX-1") {
+        speak("Protocol reset. Active step S01: Please position the outer container box in workspace view.", { isAlert: false, pitch: 0.95, rate: 0.92 });
+      } else {
+        speak("Protocol reset. Active step S01: Please place your water bottle on table in view.", { isAlert: false, pitch: 0.95, rate: 0.92 });
+      }
       if (trackerMode === "demo-vid") fetchNextVideoFrame();
     });
 
@@ -1560,8 +2577,27 @@ td.num { text-align: right; }
       updateTrackerUI(telem);
     });
 
+    const simColBtn = $("#sim-bcx-col");
+    if (simColBtn) {
+      simColBtn.addEventListener("click", async () => {
+        const telem = await api.trackerSimulate("bcx1_collision");
+        updateTrackerUI(telem);
+      });
+    }
+    const simSkipRedBtn = $("#sim-bcx-skip");
+    if (simSkipRedBtn) {
+      simSkipRedBtn.addEventListener("click", async () => {
+        const telem = await api.trackerSimulate("bcx1_skip_red");
+        updateTrackerUI(telem);
+      });
+    }
+
     sel.addEventListener("change", async () => {
       stopTrackerLoop();
+      if (feedAutoShutoffTimer) {
+        clearTimeout(feedAutoShutoffTimer);
+        feedAutoShutoffTimer = null;
+      }
       lastStepSpoken = "";
       protocolDoneSpoken = false;
       const telem = await api.trackerSetExperiment(sel.value);
@@ -1603,6 +2639,9 @@ td.num { text-align: right; }
             const opt = node("option", { value: exp.id }, `${exp.id} : ${exp.title}`);
             sel.appendChild(opt);
           }
+          if (expData.experiments.length > 0) {
+            sel.value = expData.experiments[0].id;
+          }
         }
       } catch (e) {
         console.warn("Using default experiments:", e);
@@ -1624,11 +2663,19 @@ td.num { text-align: right; }
         console.warn("Could not list hardware cameras:", e);
       }
 
+      // Explicitly set experiment to selected procedure (BCX-1) so steps and prompts synchronize
       try {
-        const telem = await api.trackerTelemetry();
+        const activeExp = sel.value || "BCX-1";
+        const telem = await api.trackerSetExperiment(activeExp);
         if (telem) updateTrackerUI(telem);
       } catch (e) {
-        console.warn("Init telemetry error:", e);
+        console.warn("Init setExperiment error:", e);
+        try {
+          const telem = await api.trackerTelemetry();
+          if (telem) updateTrackerUI(telem);
+        } catch (err) {
+          console.warn("Init telemetry fallback error:", err);
+        }
       }
     })();
 
@@ -1649,6 +2696,8 @@ td.num { text-align: right; }
       }
 
       trackerPlaying = true;
+      isCameraFeedOff = false;
+      syncFeedToggleUI(true);
       playBtn.textContent = "⏸ Pause Live Camera";
       videoPlaceholder.style.display = "flex";
       videoPlaceholder.innerHTML = `
@@ -1682,9 +2731,13 @@ td.num { text-align: right; }
         rawVideo.style.display = "block";
         runWebcamLoop();
         speak("Live camera activated. Please place your water bottle in camera view.");
+        if (chkAutoRec && chkAutoRec.checked && !isRecordingActive) {
+          setTimeout(() => { if (!isRecordingActive) startExperimentRecording(); }, 600);
+        }
       } catch (err) {
         console.warn("Browser webcam error:", err);
         trackerPlaying = false;
+        syncFeedToggleUI(false);
         playBtn.textContent = "▶ Start Live Camera";
         videoPlaceholder.style.display = "flex";
         videoPlaceholder.innerHTML = `
@@ -1723,6 +2776,7 @@ td.num { text-align: right; }
             imgOut.style.display = "block";
             rawVideo.style.display = "none";
           }
+          if (isRecordingActive) renderFrameToRecCanvas();
         }
         if (res && res.telemetry) updateTrackerUI(res.telemetry);
       } catch (e) {
@@ -1747,6 +2801,8 @@ td.num { text-align: right; }
       }
 
       trackerPlaying = true;
+      isCameraFeedOff = false;
+      syncFeedToggleUI(true);
       playBtn.textContent = "⏸ Pause OpenCV Camera";
       videoPlaceholder.style.display = "flex";
       videoPlaceholder.innerHTML = `
@@ -1767,8 +2823,12 @@ td.num { text-align: right; }
         }
         speak("Direct OpenCV host camera activated.");
         runDirectCamLoop();
+        if (chkAutoRec && chkAutoRec.checked && !isRecordingActive) {
+          setTimeout(() => { if (!isRecordingActive) startExperimentRecording(); }, 600);
+        }
       } catch (err) {
         trackerPlaying = false;
+        syncFeedToggleUI(false);
         playBtn.textContent = "▶ Start OpenCV Camera";
         videoPlaceholder.style.display = "flex";
         videoPlaceholder.innerHTML = `
@@ -1795,6 +2855,7 @@ td.num { text-align: right; }
               imgOut.style.display = "block";
               videoPlaceholder.style.display = "none";
             }
+            if (isRecordingActive) renderFrameToRecCanvas();
           }
           if (res && res.telemetry) {
             updateTrackerUI(res.telemetry);
@@ -1817,6 +2878,9 @@ td.num { text-align: right; }
       trackerPlaying = true;
       playBtn.textContent = "⏸ Pause Video";
       trackerInterval = setInterval(fetchNextVideoFrame, 80);
+      if (chkAutoRec && chkAutoRec.checked && !isRecordingActive) {
+        setTimeout(() => { if (!isRecordingActive) startExperimentRecording(); }, 600);
+      }
     }
 
     async function fetchNextVideoFrame() {
@@ -1826,7 +2890,10 @@ td.num { text-align: right; }
           stopTrackerLoop();
           return;
         }
-        if (res.annotated_frame) imgOut.src = res.annotated_frame;
+        if (res.annotated_frame) {
+          imgOut.src = res.annotated_frame;
+          if (isRecordingActive) renderFrameToRecCanvas();
+        }
         if (res.telemetry) updateTrackerUI(res.telemetry);
       } catch (e) {
         console.warn("Video frame error:", e);
@@ -1834,9 +2901,13 @@ td.num { text-align: right; }
     }
 
     function stopTrackerLoop() {
+      if (isRecordingActive) {
+        stopExperimentRecording();
+      }
       trackerPlaying = false;
       isSendingFrame = false;
       isFetchingDirectFrame = false;
+      syncFeedToggleUI(false);
       playBtn.textContent = trackerMode === "direct-cam" ? "▶ Start OpenCV Camera" : (trackerMode === "webcam" ? "▶ Start Live Camera" : "▶ Play Video");
       if (trackerInterval) {
         clearInterval(trackerInterval);
@@ -1871,8 +2942,14 @@ td.num { text-align: right; }
       statusBadge.textContent = `ALERT: ${telem.recent_alert.kind.toUpperCase()}`;
       statusBadge.className = "t-badge alert";
     } else if (telem.is_complete) {
-      statusBadge.textContent = "✓ Protocol Verified Nominal";
-      statusBadge.className = "t-badge active";
+      const autoShutoffChecked = $("#chk-auto-cam-shutoff") ? $("#chk-auto-cam-shutoff").checked : true;
+      if (trackerPlaying && autoShutoffChecked) {
+        statusBadge.textContent = "✓ Protocol Verified Nominal · Shutting Off Feed…";
+        statusBadge.className = "t-badge active";
+      } else {
+        statusBadge.textContent = "✓ Protocol Verified Nominal";
+        statusBadge.className = "t-badge active";
+      }
     } else if (isVerifying) {
       statusBadge.textContent = `⏳ Verifying Step ${telem.active_step_id} (${verifyPct}%)`;
       statusBadge.className = "t-badge verifying";
@@ -1894,9 +2971,11 @@ td.num { text-align: right; }
       alertTitle.textContent = `⚠ ${a.kind.toUpperCase()} DEVIATION DETECTED [${a.step_id}]`;
       alertDetail.textContent = a.message;
 
-      if (a.tts && a.tts !== lastSpokenTts) {
+      const aTime = a.timestamp || 0;
+      if (aTime !== lastAlertTimestamp || (a.tts && a.tts !== lastSpokenTts)) {
+        lastAlertTimestamp = aTime;
         lastSpokenTts = a.tts;
-        speak(a.tts);
+        speak(a.tts, { isAlert: true, pitch: 1.18, rate: 0.90 });
       }
     } else if (telem.is_complete) {
       alertBanner.className = "tracker-alert-banner nominal";
@@ -1916,7 +2995,7 @@ td.num { text-align: right; }
     const drinkBox = $("#t-drinking-container");
     if (drinkBox) {
       const d = telem.drinking || {};
-      if (telem.active_step_id === "S03" || (d.hold_duration_s > 0 && !telem.is_complete)) {
+      if (telem.experiment_id === "WBP-1" && (telem.active_step_id === "S03" || (d.hold_duration_s > 0 && !telem.is_complete))) {
         drinkBox.style.display = "block";
         const pct = d.progress_pct || 0;
         const holdS = d.hold_duration_s || 0;
@@ -1943,11 +3022,11 @@ td.num { text-align: right; }
       }
     }
 
-    // Update Return & Release Widget (Active during S04)
+    // Update Return & Release Widget (Active during S04 of WBP-1)
     const settleBox = $("#t-settle-container");
     if (settleBox) {
       const s = telem.settle || {};
-      if (telem.active_step_id === "S04" || (s.hold_duration_s > 0 && !telem.is_complete)) {
+      if (telem.experiment_id === "WBP-1" && (telem.active_step_id === "S04" || (s.hold_duration_s > 0 && !telem.is_complete))) {
         settleBox.style.display = "block";
         const pct = s.progress_pct || 0;
         const holdS = s.hold_duration_s || 0;
@@ -1978,47 +3057,165 @@ td.num { text-align: right; }
       }
     }
 
+    // Update BCX-1 Box Collision Dynamics Widget
+    const colBox = $("#t-collision-container");
+    if (colBox) {
+      if (telem.experiment_id === "BCX-1" || telem.collision) {
+        colBox.style.display = "block";
+        const c = telem.collision || {};
+        const pct = c.progress_pct || 0;
+        const holdS = c.hold_duration_s || 0;
+        const targetS = c.target_duration_s || 0.8;
+        const inProg = c.in_progress || c.is_colliding;
+        const distPx = c.distance_px;
+        const redIn = c.red_inside;
+        const yelIn = c.yellow_inside;
+
+        if (telem.is_complete) {
+          $("#t-collision-pct").textContent = "100% (Complete)";
+          $("#t-collision-bar").style.width = "100%";
+          $("#t-collision-bar").style.background = "var(--ok)";
+          $("#t-collision-label").textContent = "✓ Collision Experiment Verified Nominal";
+          $("#t-collision-hint").textContent = "Boxes collided inside container and separated. All 6 steps complete.";
+        } else if (c.is_separated || telem.active_step_id === "S06") {
+          const sepPct = c.separation_pct || 0;
+          const sepS = c.separation_hold_s || 0;
+          const sepTarget = c.separation_target_s || 0.7;
+          $("#t-collision-pct").textContent = `${sepPct}% (${sepS.toFixed(1)}s / ${sepTarget.toFixed(1)}s)`;
+          $("#t-collision-bar").style.width = `${sepPct}%`;
+          $("#t-collision-bar").style.background = c.is_separated ? "var(--ok)" : "var(--warn)";
+          $("#t-collision-label").textContent = `↔ SEPARATION PROGRESS (${sepPct}%)`;
+          $("#t-collision-hint").textContent = `Boxes separated (distance: ${c.distance_px ? Math.round(c.distance_px) : 0}px / target: 20px). Maintain separation steadily.`;
+        } else if (inProg) {
+          $("#t-collision-pct").textContent = `${pct}% (${holdS.toFixed(1)}s / ${targetS.toFixed(1)}s)`;
+          $("#t-collision-bar").style.width = `${pct}%`;
+          $("#t-collision-bar").style.background = "var(--ok)";
+          $("#t-collision-label").textContent = `⚡ ACTIVE COLLISION VERIFICATION (${pct}%)`;
+          $("#t-collision-hint").textContent = `Maintaining contact inside container steadily (${targetS.toFixed(1)}s)...`;
+        } else if (distPx !== null && distPx !== undefined) {
+          $("#t-collision-pct").textContent = `${pct}% (${holdS.toFixed(1)}s / ${targetS.toFixed(1)}s)`;
+          $("#t-collision-bar").style.width = `${pct}%`;
+          $("#t-collision-bar").style.background = pct > 0 ? "var(--warn)" : "#FF9500";
+          $("#t-collision-label").textContent = `💥 Box Collision Dynamics (Distance: ${Math.round(distPx)}px)`;
+          $("#t-collision-hint").textContent = (redIn && yelIn) ? "Bring Red and Yellow boxes together until they touch." : "Ensure both boxes are inside container before colliding.";
+        } else {
+          $("#t-collision-pct").textContent = "0% (0.0s / 0.8s)";
+          $("#t-collision-bar").style.width = "0%";
+          $("#t-collision-bar").style.background = "#FF9500";
+          $("#t-collision-label").textContent = "💥 Box Collision Dynamics Progress";
+          $("#t-collision-hint").textContent = "S01 Identify container -> S02 Verify colors -> S03 Red box -> S04 Yellow box -> S05 Collide -> S06 Separate.";
+        }
+      } else {
+        colBox.style.display = "none";
+      }
+    }
+
     // Update Geometry Sensor Readout
     if (telem.geometry) {
       const g = telem.geometry;
       const graspEl = $("#t-geom-grasp");
-      if (graspEl) {
-        graspEl.textContent = g.hand_contact ? "YES" : (g.closest_wrist_px ? `${Math.round(g.closest_wrist_px)}px` : "NO");
-        graspEl.style.color = g.hand_contact ? "var(--ok)" : "var(--ink-2)";
-      }
       const liftEl = $("#t-geom-lift");
-      if (liftEl) {
-        liftEl.textContent = g.is_lifted ? `+${Math.round(g.lift_delta_px || 0)}px` : `${Math.round(g.lift_delta_px || 0)}px`;
-        liftEl.style.color = g.is_lifted ? "var(--ok)" : "var(--ink-2)";
-      }
       const mouthEl = $("#t-geom-mouth");
-      if (mouthEl) {
-        mouthEl.textContent = g.dist_to_mouth_px ? `${Math.round(g.dist_to_mouth_px)}px` : "--";
-        mouthEl.style.color = g.near_mouth ? "var(--ok)" : "var(--ink-2)";
-      }
       const poseEl = $("#t-geom-pose");
-      if (poseEl) {
-        poseEl.textContent = g.is_drinking_pose ? "DRINKING" : (g.near_mouth ? "AT MOUTH" : "NO");
-        poseEl.style.color = g.is_drinking_pose ? "var(--ok)" : (g.near_mouth ? "var(--accent)" : "var(--ink-2)");
+
+      if (telem.experiment_id === "BCX-1") {
+        if (graspEl) {
+          graspEl.textContent = g.red_inside ? "IN" : (g.red_box_detected ? "OUT" : "NO");
+          graspEl.style.color = g.red_inside ? "var(--ok)" : (g.red_box_detected ? "var(--warn)" : "var(--ink-2)");
+        }
+        if (liftEl) {
+          liftEl.textContent = g.yellow_inside ? "IN" : (g.yellow_box_detected ? "OUT" : "NO");
+          liftEl.style.color = g.yellow_inside ? "var(--ok)" : (g.yellow_box_detected ? "var(--warn)" : "var(--ink-2)");
+        }
+        if (mouthEl) {
+          mouthEl.textContent = g.distance_px !== null && g.distance_px !== undefined ? `${Math.round(g.distance_px)}px` : "--";
+          mouthEl.style.color = g.is_colliding ? "var(--crit)" : "var(--ok)";
+        }
+        if (poseEl) {
+          poseEl.textContent = g.is_colliding ? "COLLIDING" : (g.red_inside && g.yellow_inside ? "IN CONTAINER" : "TRACKING");
+          poseEl.style.color = g.is_colliding ? "var(--crit)" : "var(--accent)";
+        }
+      } else {
+        if (graspEl) {
+          graspEl.textContent = g.hand_contact ? "YES" : (g.closest_wrist_px ? `${Math.round(g.closest_wrist_px)}px` : "NO");
+          graspEl.style.color = g.hand_contact ? "var(--ok)" : "var(--ink-2)";
+        }
+        if (liftEl) {
+          liftEl.textContent = g.is_lifted ? `+${Math.round(g.lift_delta_px || 0)}px` : `${Math.round(g.lift_delta_px || 0)}px`;
+          liftEl.style.color = g.is_lifted ? "var(--ok)" : "var(--ink-2)";
+        }
+        if (mouthEl) {
+          mouthEl.textContent = g.dist_to_mouth_px ? `${Math.round(g.dist_to_mouth_px)}px` : "--";
+          mouthEl.style.color = g.near_mouth ? "var(--ok)" : "var(--ink-2)";
+        }
+        if (poseEl) {
+          poseEl.textContent = g.is_drinking_pose ? "DRINKING" : (g.near_mouth ? "AT MOUTH" : "NO");
+          poseEl.style.color = g.is_drinking_pose ? "var(--ok)" : (g.near_mouth ? "var(--accent)" : "var(--ink-2)");
+        }
       }
     }
 
-    // Spoken Astronaut Step Guidance
+    // Spoken Astronaut Step Guidance with Modulated Aerospace Voice
     if (telem.active_step_id && telem.active_step_id !== lastStepSpoken) {
       const prev = lastStepSpoken;
       lastStepSpoken = telem.active_step_id;
-      if (prev === "S01" && telem.active_step_id === "S02") {
-        speak("Step one verified. Bottle located. Proceed to step two: grasp and lift the bottle.");
-      } else if (prev === "S02" && telem.active_step_id === "S03") {
-        speak("Step two verified. Bottle lifted. Proceed to step three: drink water and hold near your mouth.");
-      } else if (prev === "S03" && telem.active_step_id === "S04") {
-        speak("Step three verified. Water consumed. Proceed to step four: return the bottle to table and release.");
+      if (telem.experiment_id === "BCX-1") {
+        if (prev === "S01" && telem.active_step_id === "S02") {
+          speak("Container box identified and locked. Proceed to step two: present both Red and Yellow boxes to verify colors.", { isAlert: false, pitch: 0.95, rate: 0.92 });
+        } else if (prev === "S02" && telem.active_step_id === "S03") {
+          speak("Colors verified accurately. Proceed to step three: place the Red Box inside the container.", { isAlert: false, pitch: 0.95, rate: 0.92 });
+        } else if (prev === "S03" && telem.active_step_id === "S04") {
+          speak("Red Box verified inside container. Proceed to step four: place the Yellow Box inside.", { isAlert: false, pitch: 0.95, rate: 0.92 });
+        } else if (prev === "S04" && telem.active_step_id === "S05") {
+          speak("Both boxes inside container. Proceed to step five: bring boxes together to collide.", { isAlert: false, pitch: 0.95, rate: 0.92 });
+        } else if (prev === "S05" && telem.active_step_id === "S06") {
+          speak("Collision confirmed and contact verified. Proceed to step six: separate the boxes by at least 20 pixels.", { isAlert: false, pitch: 0.95, rate: 0.92 });
+        } else if (activeStepObj) {
+          speak(`Active step ${telem.active_step_id}: ${activeStepObj.prompt}`, { isAlert: false, pitch: 0.95, rate: 0.92 });
+        }
+      } else {
+        if (prev === "S01" && telem.active_step_id === "S02") {
+          speak("Step one verified. Bottle located. Proceed to step two: grasp and lift the bottle.", { isAlert: false, pitch: 0.95, rate: 0.92 });
+        } else if (prev === "S02" && telem.active_step_id === "S03") {
+          speak("Step two verified. Bottle lifted. Proceed to step three: drink water and hold near your mouth.", { isAlert: false, pitch: 0.95, rate: 0.92 });
+        } else if (prev === "S03" && telem.active_step_id === "S04") {
+          speak("Step three verified. Water consumed. Proceed to step four: return the bottle to table and release.", { isAlert: false, pitch: 0.95, rate: 0.92 });
+        }
       }
     }
 
     if (telem.is_complete && !protocolDoneSpoken) {
       protocolDoneSpoken = true;
-      speak("Water bottle protocol complete. All steps verified nominal.");
+      if (telem.experiment_id === "BCX-1") {
+        speak("Two-box collision experiment complete. All six steps verified nominal.", { isAlert: false, pitch: 0.95, rate: 0.92 });
+      } else {
+        speak("Water bottle protocol complete. All steps verified nominal.", { isAlert: false, pitch: 0.95, rate: 0.92 });
+      }
+
+      // Automatic camera shutoff after experiment completion
+      const autoShutoffChecked = $("#chk-auto-cam-shutoff") ? $("#chk-auto-cam-shutoff").checked : true;
+      if (autoShutoffChecked && trackerPlaying && typeof switchOffCameraFeed === "function") {
+        if (feedAutoShutoffTimer) clearTimeout(feedAutoShutoffTimer);
+        feedAutoShutoffTimer = setTimeout(() => {
+          switchOffCameraFeed("completed");
+          speak("Experiment complete. Camera feed switched off.", { isAlert: false, pitch: 0.95, rate: 0.95 });
+        }, 2600);
+      }
+
+      // Auto-save experiment recording on protocol completion
+      const autoSaveRecChecked = chkAutoSaveRec ? chkAutoSaveRec.checked : true;
+      if (autoSaveRecChecked && isRecordingActive) {
+        setTimeout(() => {
+          if (isRecordingActive) {
+            stopExperimentRecording();
+          }
+        }, 1200);
+      }
+
+      // Auto-generate mission procedure report (.txt & .pdf) on protocol completion
+      setTimeout(() => {
+        generateProcedureReport();
+      }, 1500);
     }
 
     const stepList = $("#t-step-list");
@@ -2061,11 +3258,90 @@ td.num { text-align: right; }
     }
     $("#t-checklist-progress").textContent = `${completedCount} / ${(telem.steps || []).length} verified`;
 
+    // Update Report Card Telemetry
+    if (repTelemSteps) repTelemSteps.textContent = `${completedCount} / ${(telem.steps || []).length}`;
+    if (repTelemCompliance) {
+      const totalSteps = (telem.steps || []).length || 1;
+      const score = Math.round((completedCount / totalSteps) * 100);
+      repTelemCompliance.textContent = `${score}.0%`;
+      repTelemCompliance.style.color = score === 100 ? "var(--ok)" : (score >= 50 ? "var(--warn)" : "var(--crit)");
+    }
+    if (repTelemStatus) {
+      if (telem.is_complete) {
+        repTelemStatus.textContent = "NOMINAL (COMPLETE)";
+        repTelemStatus.style.color = "var(--ok)";
+      } else {
+        repTelemStatus.textContent = `IN PROGRESS [${telem.active_step_id || "S01"}]`;
+        repTelemStatus.style.color = "var(--accent)";
+      }
+    }
+
     const geo = telem.geometry || {};
-    $("#m-target").textContent = geo.target_detected ? `YES (${Math.round((geo.target_confidence || 0.9)*100)}%)` : "SEARCHING";
-    $("#m-contact").textContent = geo.hand_contact ? "GRASPED" : "NONE";
-    $("#m-lift").textContent = geo.is_lifted ? "LIFTED" : "ON TABLE";
-    $("#m-mouth").textContent = geo.near_mouth ? "DRINK ZONE" : "AWAY";
+    if (telem.experiment_id === "BCX-1") {
+      const l1 = $("#m-lbl-1"); if (l1) l1.textContent = "Container Box";
+      const l2 = $("#m-lbl-2"); if (l2) l2.textContent = "Red Box";
+      const l3 = $("#m-lbl-3"); if (l3) l3.textContent = "Yellow Box";
+      const l4 = $("#m-lbl-4"); if (l4) l4.textContent = "Collision Dynamics";
+
+      const gl1 = $("#t-geom-l1"); if (gl1) gl1.textContent = "Red Box";
+      const gl2 = $("#t-geom-l2"); if (gl2) gl2.textContent = "Yellow Box";
+      const gl3 = $("#t-geom-l3"); if (gl3) gl3.textContent = "Distance";
+      const gl4 = $("#t-geom-l4"); if (gl4) gl4.textContent = "Collision";
+
+      $("#m-target").textContent = geo.outer_box_detected ? "FOUND" : "SEARCHING";
+      $("#m-contact").textContent = geo.red_inside ? "IN CONTAINER" : (geo.red_box_detected ? "DETECTED" : "SEARCHING");
+      $("#m-lift").textContent = geo.yellow_inside ? "IN CONTAINER" : (geo.yellow_box_detected ? "DETECTED" : "SEARCHING");
+      $("#m-mouth").textContent = geo.is_colliding ? "💥 COLLIDING" : (geo.distance_px !== null && geo.distance_px !== undefined ? `${Math.round(geo.distance_px)}px` : "CLEAR");
+    } else {
+      const l1 = $("#m-lbl-1"); if (l1) l1.textContent = "Target Object";
+      const l2 = $("#m-lbl-2"); if (l2) l2.textContent = "Hand Contact";
+      const l3 = $("#m-lbl-3"); if (l3) l3.textContent = "Bottle Lifted";
+      const l4 = $("#m-lbl-4"); if (l4) l4.textContent = "Near Mouth";
+
+      const gl1 = $("#t-geom-l1"); if (gl1) gl1.textContent = "Grasp";
+      const gl2 = $("#t-geom-l2"); if (gl2) gl2.textContent = "Lift";
+      const gl3 = $("#t-geom-l3"); if (gl3) gl3.textContent = "Mouth Dist";
+      const gl4 = $("#t-geom-l4"); if (gl4) gl4.textContent = "Drink Action";
+
+      $("#m-target").textContent = geo.target_detected ? `YES (${Math.round((geo.target_confidence || 0.9)*100)}%)` : "SEARCHING";
+      $("#m-contact").textContent = geo.hand_contact ? "GRASPED" : "NONE";
+      $("#m-lift").textContent = geo.is_lifted ? "LIFTED" : "ON TABLE";
+      $("#m-mouth").textContent = geo.near_mouth ? "DRINK ZONE" : "AWAY";
+    }
+
+    // Update Full-Body Biometric Matrix
+    const bioPtsBadge = $("#bio-points-badge");
+    const bioPosture = $("#bio-posture");
+    const bioSpine = $("#bio-spine");
+    const bioVel = $("#bio-velocity");
+    const bioStab = $("#bio-stability");
+    const bioLed = $("#bio-led");
+    const bioZHead = $("#bio-zone-head");
+    const bioZArms = $("#bio-zone-arms");
+    const bioZTorso = $("#bio-zone-torso");
+    const bioZLegs = $("#bio-zone-legs");
+
+    const pts = geo.body_points_count !== undefined ? geo.body_points_count : 0;
+    if (bioPtsBadge) bioPtsBadge.textContent = `${pts} / 17 PTS`;
+    if (bioPosture) {
+      bioPosture.textContent = geo.posture_status ? geo.posture_status.replace(/_/g, " ") : "SEARCHING";
+      bioPosture.style.color = (geo.posture_status && (geo.posture_status.includes("ANCHORED") || geo.posture_status.includes("ALIGNED"))) ? "var(--ok)" : ((geo.posture_status && geo.posture_status.includes("FLOATING")) ? "var(--warn)" : "#00f0ff");
+    }
+    if (bioSpine) bioSpine.textContent = `${Math.abs(geo.torso_angle_deg || 0).toFixed(1)}°`;
+    if (bioVel) bioVel.textContent = `${(geo.body_velocity_px_s || 0).toFixed(1)} px/s`;
+    if (bioStab) {
+      bioStab.textContent = geo.posture_stability ? geo.posture_stability.replace(/_/g, " ") : "NOMINAL";
+      bioStab.style.color = geo.posture_stability === "STABLE" ? "var(--ok)" : (geo.posture_stability === "RAPID_DISPLACEMENT" ? "var(--crit)" : "var(--warn)");
+    }
+    if (bioLed) {
+      bioLed.style.background = pts >= 10 ? "var(--ok)" : (pts > 0 ? "var(--warn)" : "var(--crit)");
+      bioLed.style.boxShadow = pts >= 10 ? "0 0 8px var(--ok)" : (pts > 0 ? "0 0 8px var(--warn)" : "0 0 8px var(--crit)");
+    }
+    const zones = geo.body_zones || {};
+    if (bioZHead) bioZHead.textContent = `${zones.head || 0} / 5`;
+    if (bioZArms) bioZArms.textContent = `${zones.upper_limbs || 0} / 4`;
+    if (bioZTorso) bioZTorso.textContent = `${zones.torso || 0} / 4`;
+    if (bioZLegs) bioZLegs.textContent = `${zones.lower_limbs || 0} / 4`;
   }
 
   // ---- tabs -------------------------------------------------------------

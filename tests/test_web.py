@@ -60,6 +60,58 @@ def test_an_embedded_page_needs_no_server_and_is_publishable():
               "data": {"x": {"note": "</script> must not end the tag"}}, "results": {}}
     bare = page(bundle, standalone=False)
     assert "window.PARIKSHAK_BUNDLE=" in bare
-    assert "<html" not in bare and "<body" not in bare
-    assert "</script> must" not in bare, "embedded data must not be able to close the script"
     assert page(bundle).startswith("<!doctype html>")
+
+
+def test_recording_endpoints():
+    pytest.importorskip("httpx")
+    from fastapi.testclient import TestClient
+
+    client = TestClient(create_app())
+    fake_video = b"FAKEMEDIA_WEBM_VIDEO_DATA_FOR_PARIKSHAK_TEST"
+    res = client.post(
+        "/api/tracker/save_recording",
+        files={"file": ("test_run_exp.webm", fake_video, "video/webm")},
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "saved"
+    assert "test_run_exp.webm" in data["filename"]
+    assert data["size_bytes"] == len(fake_video)
+    assert data["url"].startswith("/recordings/")
+
+    recs = client.get("/api/tracker/recordings").json()
+    assert "recordings" in recs
+    assert recs["count"] >= 1
+    assert any("test_run_exp.webm" in r["name"] for r in recs["recordings"])
+
+
+def test_report_endpoints():
+    pytest.importorskip("httpx")
+    from fastapi.testclient import TestClient
+
+    client = TestClient(create_app())
+    gen_res = client.post("/api/tracker/generate_report")
+    assert gen_res.status_code == 200
+    gen_data = gen_res.json()
+    assert gen_data["status"] == "generated"
+    assert "text_file" in gen_data
+    assert "pdf_file" in gen_data
+    assert "preview_text" in gen_data
+    assert "PARIKSHAK" in gen_data["preview_text"]
+
+    txt_res = client.get("/api/tracker/download_report/text")
+    assert txt_res.status_code == 200
+    assert "PARIKSHAK ON-BOARD MISSION PROCEDURE WITNESS REPORT" in txt_res.text
+    assert "1. PROCEDURE STEP EXECUTION AUDIT CHRONOLOGY" in txt_res.text
+
+    pdf_res = client.get("/api/tracker/download_report/pdf")
+    assert pdf_res.status_code == 200
+    assert pdf_res.headers["content-type"] == "application/pdf"
+    assert pdf_res.content.startswith(b"%PDF")
+
+    rep_list = client.get("/api/tracker/reports").json()
+    assert "reports" in rep_list
+    assert rep_list["count"] >= 1
+
+

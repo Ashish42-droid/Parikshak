@@ -12,10 +12,12 @@ from __future__ import annotations
 import argparse
 import json
 import threading
+import time
 import webbrowser
 from pathlib import Path
 from typing import Any
 import numpy as np
+from starlette.requests import Request
 
 from demo import guided
 from demo.scenarios import DEFAULT, GROUP_ORDER, catalogue, replay_json, results
@@ -45,7 +47,7 @@ def page(bundle: dict[str, Any] | None = None, *, standalone: bool = True) -> st
 
 
 def create_app():
-    from fastapi import FastAPI, HTTPException, UploadFile, File
+    from fastapi import FastAPI, HTTPException, UploadFile, File, Request
     from fastapi.responses import HTMLResponse, Response
     from parikshak.perception.tracker_service import get_tracker_service
     from fastapi.staticfiles import StaticFiles
@@ -58,6 +60,14 @@ def create_app():
     static_p = Path("demo/static")
     if static_p.exists():
         app.mount("/static", StaticFiles(directory=str(static_p)), name="static")
+
+    recordings_p = Path("recordings")
+    recordings_p.mkdir(exist_ok=True)
+    app.mount("/recordings", StaticFiles(directory=str(recordings_p)), name="recordings")
+
+    reports_p = Path("reports")
+    reports_p.mkdir(exist_ok=True)
+    app.mount("/reports", StaticFiles(directory=str(reports_p)), name="reports")
 
     @app.get("/", response_class=HTMLResponse)
     def index() -> str:
@@ -126,6 +136,15 @@ def create_app():
     def tracker_experiments() -> dict[str, Any]:
         return {
             "experiments": [
+                {
+                    "id": "BCX-1",
+                    "title": "BCX-1: Two-Box Collision in Container (Red & Yellow)",
+                    "category": "Physical Dynamics & Color HAR",
+                    "rack": "BENCH-1 (Desktop Workspace / Glovebox)",
+                    "steps_count": 6,
+                    "target_object": "Red & Yellow Boxes",
+                    "description": "Validates real-time color tracking & collision dynamics: S01 Identify container -> S02 Verify box colors (Red & Yellow) -> S03 Place Red box -> S04 Place Yellow box -> S05 Collide boxes -> S06 Separate boxes. Guards against skipped placement, uncalibrated colors, and out-of-bounds collision.",
+                },
                 {
                     "id": "WBP-1",
                     "title": "Water Bottle Protocol (Activity Benchmark)",
@@ -248,6 +267,118 @@ def create_app():
                 time.sleep(0.033)
 
         return StreamingResponse(stream_generator(), media_type="multipart/x-mixed-replace; boundary=frame")
+
+    @app.post("/api/tracker/save_recording")
+    async def tracker_save_recording(request: Request) -> dict[str, Any]:
+        recordings_dir = Path("recordings")
+        recordings_dir.mkdir(exist_ok=True)
+        import time
+
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        content_type = request.headers.get("content-type", "")
+        file_bytes = b""
+        filename = ""
+
+        if "multipart/form-data" in content_type:
+            form = await request.form()
+            file_item = form.get("file")
+            if file_item is not None and hasattr(file_item, "read"):
+                filename = getattr(file_item, "filename", "") or ""
+                file_bytes = await file_item.read()
+
+        if not file_bytes:
+            file_bytes = await request.body()
+
+        if filename:
+            safe_name = Path(filename).name
+            if not safe_name.endswith((".webm", ".mp4", ".mkv", ".avi")):
+                safe_name = f"{safe_name}_{timestamp}.webm"
+        else:
+            safe_name = f"PARIKSHAK_EXP_{timestamp}.webm"
+
+        target_path = recordings_dir / safe_name
+        target_path.write_bytes(file_bytes)
+        file_size = target_path.stat().st_size
+        return {
+            "status": "saved",
+            "filename": safe_name,
+            "filepath": str(target_path.resolve()),
+            "size_bytes": file_size,
+            "size_mb": round(file_size / (1024 * 1024), 2),
+            "url": f"/recordings/{safe_name}",
+        }
+
+    @app.get("/api/tracker/recordings")
+    def tracker_list_recordings() -> dict[str, Any]:
+        recordings_dir = Path("recordings")
+        recordings_dir.mkdir(exist_ok=True)
+        files = []
+        for ext in ("*.webm", "*.mp4", "*.mkv", "*.avi"):
+            for f in recordings_dir.glob(ext):
+                stat = f.stat()
+                files.append({
+                    "name": f.name,
+                    "filepath": str(f.resolve()),
+                    "size_bytes": stat.st_size,
+                    "size_mb": round(stat.st_size / (1024 * 1024), 2),
+                    "mtime": stat.st_mtime,
+                    "url": f"/recordings/{f.name}",
+                })
+        files.sort(key=lambda x: x["mtime"], reverse=True)
+        return {"recordings": files, "count": len(files), "directory": str(recordings_dir.resolve())}
+
+    @app.post("/api/tracker/generate_report")
+    def tracker_generate_report() -> dict[str, Any]:
+        from parikshak.perception.report_generator import generate_structured_text_report, save_reports_to_disk
+        res = save_reports_to_disk(tracker_svc)
+        res["preview_text"] = generate_structured_text_report(tracker_svc)
+        return res
+
+    @app.get("/api/tracker/download_report/text")
+    def tracker_download_text_report():
+        from parikshak.perception.report_generator import generate_structured_text_report
+        txt = generate_structured_text_report(tracker_svc)
+        exp_id = tracker_svc.experiment_id
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        filename = f"PARIKSHAK_REPORT_{exp_id}_{timestamp}.txt"
+        return Response(
+            content=txt.encode("utf-8"),
+            media_type="text/plain; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    @app.get("/api/tracker/download_report/pdf")
+    def tracker_download_pdf_report():
+        from parikshak.perception.report_generator import generate_pdf_report
+        pdf_bytes = generate_pdf_report(tracker_svc)
+        exp_id = tracker_svc.experiment_id
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        filename = f"PARIKSHAK_REPORT_{exp_id}_{timestamp}.pdf"
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    @app.get("/api/tracker/reports")
+    def tracker_list_reports() -> dict[str, Any]:
+        reports_dir = Path("reports")
+        reports_dir.mkdir(exist_ok=True)
+        files = []
+        for ext in ("*.txt", "*.pdf"):
+            for f in reports_dir.glob(ext):
+                stat = f.stat()
+                files.append({
+                    "name": f.name,
+                    "filepath": str(f.resolve()),
+                    "size_bytes": stat.st_size,
+                    "size_kb": round(stat.st_size / 1024, 1),
+                    "is_pdf": f.suffix.lower() == ".pdf",
+                    "mtime": stat.st_mtime,
+                    "url": f"/reports/{f.name}",
+                })
+        files.sort(key=lambda x: x["mtime"], reverse=True)
+        return {"reports": files, "count": len(files), "directory": str(reports_dir.resolve())}
 
     return app
 

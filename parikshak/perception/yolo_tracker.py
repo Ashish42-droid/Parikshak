@@ -15,8 +15,60 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Sequence
 
-import cv2
+try:
+    import importlib
+    cv2 = importlib.import_module("cv2")
+except ImportError:
+    cv2 = None  # type: ignore
 import numpy as np
+
+# 17 COCO Keypoints for Astronaut Skeletal Tracking
+COCO_KEYPOINTS = [
+    "nose",           # 0
+    "left_eye",       # 1
+    "right_eye",      # 2
+    "left_ear",       # 3
+    "right_ear",      # 4
+    "left_shoulder",  # 5
+    "right_shoulder", # 6
+    "left_elbow",     # 7
+    "right_elbow",    # 8
+    "left_wrist",     # 9
+    "right_wrist",    # 10
+    "left_hip",       # 11
+    "right_hip",      # 12
+    "left_knee",      # 13
+    "right_knee",     # 14
+    "left_ankle",     # 15
+    "right_ankle",    # 16
+]
+
+# Skeletal limb segments (bones) connecting joints with cybernetic colors (BGR)
+SKELETON_BONES = [
+    # Head / Visor links (Electric Cyan)
+    (0, 1, (255, 230, 0)),
+    (0, 2, (255, 230, 0)),
+    (1, 3, (255, 230, 0)),
+    (2, 4, (255, 230, 0)),
+    # Shoulders / Neck (Neon Cyan)
+    (5, 6, (0, 240, 255)),
+    # Left Arm (Tech Emerald)
+    (5, 7, (60, 240, 120)),
+    (7, 9, (60, 240, 120)),
+    # Right Arm (Tech Emerald)
+    (6, 8, (60, 240, 120)),
+    (8, 10, (60, 240, 120)),
+    # Torso / Spine Core (Amber Gold)
+    (5, 11, (0, 180, 255)),
+    (6, 12, (0, 180, 255)),
+    (11, 12, (0, 180, 255)),
+    # Left Leg / Lower Body (Neon Magenta)
+    (11, 13, (230, 80, 200)),
+    (13, 15, (230, 80, 200)),
+    # Right Leg / Lower Body (Neon Magenta)
+    (12, 14, (230, 80, 200)),
+    (14, 16, (230, 80, 200)),
+]
 
 
 @dataclass
@@ -45,16 +97,14 @@ class YoloExperimentTracker:
     """End-to-end vision tracker and procedure validator using YOLO and OpenCV."""
 
     # Calibration and verification hold targets (in seconds)
-    S01_TARGET_S = 1.0  # Stable on table
-    S02_TARGET_S = 1.0  # Grasp and lift
-    S03_TARGET_S = 1.4  # Drinking hold
-    S04_TARGET_S = 1.0  # Return to table & release
+    S01_TARGET_S = 0.8  # Stable on table
+    S02_TARGET_S = 0.6  # Grasp and lift
+    S03_TARGET_S = 0.8  # Drinking hold (responsive natural sip duration)
+    S04_TARGET_S = 0.6  # Return to table & release
 
     def __init__(self, experiment_id: str = "WBP-1") -> None:
-        self.experiment_id = experiment_id.upper()
         self.load_models()
-        self.init_procedure(self.experiment_id)
-        self.reset()
+        self.init_procedure(experiment_id)
 
     def load_models(self) -> None:
         from ultralytics import YOLO
@@ -67,7 +117,8 @@ class YoloExperimentTracker:
         self.pose_model(dummy, imgsz=320, verbose=False)
 
     def init_procedure(self, experiment_id: str) -> None:
-        if experiment_id == "WBP-1":
+        self.experiment_id = experiment_id.upper()
+        if self.experiment_id == "WBP-1":
             self.title = "Water Bottle Protocol (Activity Benchmark)"
             self.rack_id = "BENCH-1"
             self.steps = [
@@ -82,7 +133,7 @@ class YoloExperimentTracker:
             ]
             self.expected_target = "bottle"
             self.confusables = ["cup", "wine glass", "mug"]
-        elif experiment_id == "CRX-2":
+        elif self.experiment_id == "CRX-2":
             self.title = "CRX-2 : Colloid Resuspension and Cold Return"
             self.rack_id = "MSG-A (Space Station Rack)"
             self.steps = [
@@ -105,9 +156,28 @@ class YoloExperimentTracker:
             ]
             self.expected_target = "bottle"  # or vial
             self.confusables = ["cup"]
+        elif self.experiment_id in ["BCX-1", "BOX-COL-1"]:
+            self.title = "BCX-1: Two-Box Collision in Container (Red & Yellow)"
+            self.rack_id = "BENCH-1 (Desktop / Glovebox)"
+            self.steps = [
+                StepState("S01", "Identify Bigger Container Box",
+                          "Position and verify the outer container box in workspace view."),
+                StepState("S02", "Detect & Verify Box Colors",
+                          "Present Red Box and Yellow Box to camera to verify color detection."),
+                StepState("S03", "Place Red Box into Container",
+                          "Place the Red Box inside the container box."),
+                StepState("S04", "Place Yellow Box into Container",
+                          "Place the Yellow Box inside the container box, separated from the red box."),
+                StepState("S05", "Collide Red and Yellow Boxes",
+                          "Bring the Red and Yellow boxes together until collision occurs."),
+                StepState("S06", "Separate Boxes & Confirm",
+                          "Separate the boxes inside the container to conclude trial."),
+            ]
+            self.expected_target = "red_box"
+            self.confusables = []
         else:
             # Generic / custom space procedure
-            self.title = f"Procedure {experiment_id}"
+            self.title = f"Procedure {self.experiment_id}"
             self.rack_id = "PAYLOAD-1"
             self.steps = [
                 StepState("S01", "Identify payload sample", "Identify and inspect the payload sample."),
@@ -117,6 +187,8 @@ class YoloExperimentTracker:
             ]
             self.expected_target = "bottle"
             self.confusables = ["cup"]
+
+        self.reset()
 
     def reset(self) -> None:
         self.step_idx = 0
@@ -149,14 +221,14 @@ class YoloExperimentTracker:
         self.s02_lift_duration: float = 0.0
         self.target_lifted = False
 
-        # Step 3: Sustained drinking verification (target: 1.4s)
+        # Step 3: Sustained drinking verification (target: 0.8s)
         self.drink_hold_start: float | None = None
         self.drink_hold_duration: float = 0.0
         self.last_drinking_seen_time: float = 0.0
         self.water_consumed = False
         self.abandon_table_start: float | None = None
 
-        # Step 4: Return to table and hands released (target: 1.0s)
+        # Step 4: Return to table and hands released (target: 0.6s)
         self.s04_settle_start: float | None = None
         self.s04_settle_duration: float = 0.0
         self.last_s04_seen_time: float = 0.0
@@ -165,6 +237,51 @@ class YoloExperimentTracker:
         # Cached mouth position for when bottle occludes face during drinking
         self.last_known_mouth: tuple[float, float] | None = None
         self.last_known_mouth_time: float = 0.0
+
+        # Full-Body 17-Point Skeletal Tracking & Biometric Posture State
+        self.last_skeleton_data: dict[str, Any] | None = None
+        self.last_body_centroid: tuple[float, float] | None = None
+        self.last_centroid_time: float = 0.0
+        self.body_motion_velocity_px: float = 0.0
+        self.posture_status: str = "NO_ASTRONAUT_DETECTED"
+        self.posture_stability: str = "IDLE"
+        self.torso_angle_deg: float = 0.0
+        self.body_points_count: int = 0
+
+        # BCX-1 Two-Box Collision state variables
+        self.bcx1_outer_box: tuple[float, float, float, float] | None = None
+        self.bcx1_locked_container: tuple[float, float, float, float] | None = None
+        self.bcx1_container_locked: bool = False
+        self.bcx1_red_box: tuple[float, float, float, float] | None = None
+        self.bcx1_yellow_box: tuple[float, float, float, float] | None = None
+        self.bcx1_last_red_box: tuple[float, float, float, float] | None = None
+        self.bcx1_last_yellow_box: tuple[float, float, float, float] | None = None
+        self.bcx1_last_seen_red_time: float = 0.0
+        self.bcx1_last_seen_yellow_time: float = 0.0
+        self.bcx1_red_inside: bool = False
+        self.bcx1_yellow_inside: bool = False
+        self.bcx1_collision: bool = False
+        self.bcx1_distance_px: float = 999.0
+        self.bcx1_colors_verified: bool = False
+        self.bcx1_red_placed: bool = False
+        self.bcx1_yellow_placed: bool = False
+
+        # BCX-1 Hold Timers for 6 steps
+        self.bcx1_s01_hold_start: float | None = None
+        self.bcx1_s01_hold_duration: float = 0.0
+        self.bcx1_s02_hold_start: float | None = None
+        self.bcx1_s02_hold_duration: float = 0.0
+        self.bcx1_s03_hold_start: float | None = None
+        self.bcx1_s03_hold_duration: float = 0.0
+        self.bcx1_s04_hold_start: float | None = None
+        self.bcx1_s04_hold_duration: float = 0.0
+        self.bcx1_collision_hold_start: float | None = None
+        self.bcx1_collision_hold_duration: float = 0.0
+        self.bcx1_s06_hold_start: float | None = None
+        self.bcx1_s06_hold_duration: float = 0.0
+        self.bcx1_last_collision_time: float = 0.0
+        self.bcx1_last_separation_time: float = 0.0
+        self.bcx1_abandon_start: float | None = None
 
     def process_frame(self, frame: np.ndarray, current_time: float | None = None) -> tuple[np.ndarray, dict[str, Any]]:
         """Processes one video frame: runs YOLO detection + pose, checks procedure step logic,
@@ -181,6 +298,10 @@ class YoloExperimentTracker:
 
         # Check if dummy blank frame (used during reset / initial handshake)
         is_dummy_frame = (np.mean(frame) < 1.0)
+
+        # Route to dedicated BCX-1 Two-Box Collision pipeline
+        if self.experiment_id in ["BCX-1", "BOX-COL-1"]:
+            return self._process_bcx1_frame(frame, current_time, is_dummy_frame)
 
         # 1. Run YOLO Object Detection with imgsz=320 for sub-100ms CPU inference
         det_results = self.det_model(frame, imgsz=320, verbose=False)[0]
@@ -215,65 +336,15 @@ class YoloExperimentTracker:
             elif cls_name in self.confusables:
                 confusable_box = (x1, y1, x2, y2)
 
-        # 2. Run YOLO Pose Estimation with imgsz=320
-        pose_results = self.pose_model(frame, imgsz=320, verbose=False)[0]
-        person_detected = False
-        wrists = []
-        head_point = None
-        mouth_region = None
+        # 2. Run Full-Body 17-Point Pose Estimation & Spaceflight Biometrics
+        dt = (current_time - self.last_frame_time) if self.last_frame_time else 0.05
+        dt = min(max(dt, 0.01), 0.35)
+        self.last_frame_time = current_time
 
-        if len(pose_results.keypoints) > 0 and pose_results.keypoints.data.shape[1] >= 17:
-            kpts = pose_results.keypoints.data[0].cpu().numpy()
-            person_detected = True
-
-            # Keypoint indices in COCO:
-            # 0: nose, 1: left_eye, 2: right_eye, 3: left_ear, 4: right_ear
-            # 5: left_shoulder, 6: right_shoulder
-            # 9: left_wrist, 10: right_wrist
-            nose = kpts[0]
-            left_eye = kpts[1]
-            right_eye = kpts[2]
-            left_shoulder = kpts[5]
-            right_shoulder = kpts[6]
-
-            if nose[2] > 0.20:
-                head_point = (float(nose[0]), float(nose[1]))
-                mouth_region = (head_point[0], head_point[1] + 28.0)  # estimated mouth position below nose
-                self.last_known_mouth = mouth_region
-                self.last_known_mouth_time = current_time
-            elif left_eye[2] > 0.20 and right_eye[2] > 0.20:
-                # If nose is covered by bottle during drinking, estimate mouth from eye center!
-                eye_mid_x = (float(left_eye[0]) + float(right_eye[0])) / 2.0
-                eye_mid_y = (float(left_eye[1]) + float(right_eye[1])) / 2.0
-                mouth_region = (eye_mid_x, eye_mid_y + 45.0)
-                self.last_known_mouth = mouth_region
-                self.last_known_mouth_time = current_time
-            elif left_eye[2] > 0.20:
-                mouth_region = (float(left_eye[0]) + 15.0, float(left_eye[1]) + 45.0)
-                self.last_known_mouth = mouth_region
-                self.last_known_mouth_time = current_time
-            elif right_eye[2] > 0.20:
-                mouth_region = (float(right_eye[0]) - 15.0, float(right_eye[1]) + 45.0)
-                self.last_known_mouth = mouth_region
-                self.last_known_mouth_time = current_time
-            elif left_shoulder[2] > 0.20 and right_shoulder[2] > 0.20:
-                # Fallback to shoulder center if face completely occluded
-                sh_x = (float(left_shoulder[0]) + float(right_shoulder[0])) / 2.0
-                sh_y = (float(left_shoulder[1]) + float(right_shoulder[1])) / 2.0
-                mouth_region = (sh_x, sh_y - 95.0)
-                self.last_known_mouth = mouth_region
-                self.last_known_mouth_time = current_time
-            elif self.last_known_mouth is not None and (current_time - self.last_known_mouth_time) < 10.0:
-                # Use recent cached mouth position if bottle/hand completely occluded face while drinking
-                mouth_region = self.last_known_mouth
-
-            left_wrist = kpts[9]
-            if left_wrist[2] > 0.25:
-                wrists.append({"side": "left", "point": (float(left_wrist[0]), float(left_wrist[1])), "conf": float(left_wrist[2])})
-
-            right_wrist = kpts[10]
-            if right_wrist[2] > 0.25:
-                wrists.append({"side": "right", "point": (float(right_wrist[0]), float(right_wrist[1])), "conf": float(right_wrist[2])})
+        skeleton_data = self._extract_full_body_skeleton(frame, current_time, dt, is_dummy_frame)
+        person_detected = skeleton_data["detected"]
+        wrists = skeleton_data["wrists"]
+        mouth_region = skeleton_data["mouth_region"]
 
         # 3. Geometric Reasoning & Spatial Relationships
         hand_contact_target = False
@@ -292,8 +363,8 @@ class YoloExperimentTracker:
                 dist = math.hypot(dist_x, dist_y)
                 closest_wrist_dist = min(closest_wrist_dist, dist)
 
-                # Wrist inside or in realistic proximity (< 75px or 1.25x bottle width)
-                if dist < max(75.0, b_width * 1.25):
+                # Wrist inside or in realistic proximity (< 60px or bottle width)
+                if dist < max(60.0, b_width * 1.0):
                     hand_contact_target = True
 
         if confusable_box is not None:
@@ -310,34 +381,11 @@ class YoloExperimentTracker:
         dist_to_mouth = 9999.0
         near_mouth = False
         is_drinking_pose = False
+        wrist_dist_to_mouth = 9999.0
 
-        if target_box is not None and mouth_region is not None:
-            bx1, by1, bx2, by2 = target_box
-            b_height = by2 - by1
-            b_width = bx2 - bx1
-            top_center = ((bx1 + bx2) / 2.0, by1)  # top drinking opening of bottle
-            top_left = (bx1, by1)
-            top_right = (bx2, by1)
+        if mouth_region is not None and len(wrists) > 0:
             mx, my = mouth_region
-
-            # Distance from mouth to bottle top / cap / upper corners (handles tilted bottles)
-            dist_top = math.hypot(top_center[0] - mx, top_center[1] - my)
-            dist_tl = math.hypot(top_left[0] - mx, top_left[1] - my)
-            dist_tr = math.hypot(top_right[0] - mx, top_right[1] - my)
-            dist_to_mouth = min(dist_top, dist_tl, dist_tr)
-
-            # Distance from mouth to bottle bounding box edge
-            dist_x = max(bx1 - mx, 0.0, mx - bx2)
-            dist_y = max(by1 - my, 0.0, my - by2)
-            box_dist_to_mouth = math.hypot(dist_x, dist_y)
-
-            # Check if mouth coordinates overlap or are inside bottle upper half / near upper opening
-            mouth_overlap = (bx1 - 35.0 <= mx <= bx2 + 35.0) and (by1 - 40.0 <= my <= by1 + b_height * 0.75)
-
-            # Realistic mouth contact threshold for 480p camera:
-            # Handles bottle held directly to mouth, tilted sideways, or overlapping mouth region
-            if (dist_to_mouth < 110.0 or box_dist_to_mouth < 45.0 or mouth_overlap) and (by1 < my + 60.0):
-                near_mouth = True
+            wrist_dist_to_mouth = min(math.hypot(w["point"][0] - mx, w["point"][1] - my) for w in wrists)
 
         # Table surface baseline (calibrated during S01 when resting on table)
         table_zone_y = h * 0.65
@@ -345,8 +393,8 @@ class YoloExperimentTracker:
         in_table_zone = False
         if target_box is not None:
             b_bottom = target_box[3]
-            # In table zone if resting on or below the table reference line
-            if b_bottom >= (ref_table - 35.0) or (b_bottom > h * 0.52):
+            # In table zone if resting on or below the table reference line or lower frame
+            if b_bottom >= (ref_table - 40.0) or (b_bottom > h * 0.45):
                 in_table_zone = True
 
         # Vertical Lift Calculation
@@ -358,20 +406,83 @@ class YoloExperimentTracker:
             if self.initial_bottle_y is not None:
                 lift_delta = self.initial_bottle_y - b_center_y
 
-            # True physical lift: bottle bottom lifted > 25px off baseline table surface
-            if ((ref_table - b_bottom) > 25.0 or lift_delta > 25.0) and b_bottom < (ref_table - 15.0):
+            # True physical lift: bottle bottom lifted off baseline table surface
+            # or center is lifted above initial position, or bottle top is in upper 65% of screen
+            if (ref_table - b_bottom) > 20.0 or lift_delta > 20.0 or target_box[1] < (h * 0.60):
                 is_lifted = True
 
+        if target_box is not None and mouth_region is not None:
+            bx1, by1, bx2, by2 = target_box
+            b_height = by2 - by1
+            b_width = bx2 - bx1
+            top_center = ((bx1 + bx2) / 2.0, by1)  # top drinking opening of bottle
+            top_left = (bx1, by1)
+            top_right = (bx2, by1)
+            mid_left = (bx1, (by1 + by2) / 2.0)
+            mid_right = (bx2, (by1 + by2) / 2.0)
+            center = ((bx1 + bx2) / 2.0, (by1 + by2) / 2.0)
+            mx, my = mouth_region
+
+            # Multi-angle distance from mouth to bottle key points (upright, horizontal, tilted bottles)
+            pts = [top_center, top_left, top_right, mid_left, mid_right, center]
+            dist_to_mouth = min(math.hypot(p[0] - mx, p[1] - my) for p in pts)
+
+            # Distance from mouth to bottle bounding box edge
+            dist_x = max(bx1 - mx, 0.0, mx - bx2)
+            dist_y = max(by1 - my, 0.0, my - by2)
+            box_dist_to_mouth = math.hypot(dist_x, dist_y)
+
+            # Check if mouth coordinates overlap bottle region
+            mouth_overlap = (bx1 - 50.0 <= mx <= bx2 + 50.0) and (by1 - 40.0 <= my <= by2 + 30.0)
+
+            # CRITICAL GEOMETRY SEPARATION:
+            # The bottle is in vertical drinking elevation if the top of the bottle
+            # is at or near mouth height (NOT down on the table).
+            # When the bottle is resting on the desk, by1 is typically > my + 70px.
+            in_drinking_elevation = (by1 <= (my + 65.0))
+
+            # Near mouth requires:
+            # 1) Direct mouth overlap with bottle, OR
+            # 2) Close proximity while bottle is in drinking elevation (not resting on desk), OR
+            # 3) Wrist brought up to mouth with bottle close to mouth
+            if mouth_overlap:
+                near_mouth = True
+            elif in_drinking_elevation and (dist_to_mouth < 140.0 or box_dist_to_mouth < 70.0):
+                near_mouth = True
+            elif in_drinking_elevation and wrist_dist_to_mouth < 150.0 and dist_to_mouth < 180.0:
+                near_mouth = True
+        elif mouth_region is not None and wrist_dist_to_mouth < 135.0 and self.target_lifted:
+            # If bottle is occluded by hand/face while drinking, wrist at mouth maintains near_mouth
+            near_mouth = True
+
         # Genuine Drinking Pose requires:
-        # 1. Bottle top or box is near mouth zone
-        # 2. Bottle is raised (lifted or in upper frame near face)
-        # 3. Hand is holding the bottle (hand contact or wrist nearby)
-        if target_box is not None and near_mouth and (is_lifted or target_box[1] < (h * 0.60)):
-            if hand_contact_target or closest_wrist_dist < 110.0 or len(wrists) == 0:
+        # Case 1: Bottle detected near mouth and lifted
+        if near_mouth:
+            if target_box is not None:
+                bottle_raised = is_lifted or target_box[1] < (h * 0.65) or target_box[3] < (h * 0.80)
+                hand_holding = hand_contact_target or closest_wrist_dist < 140.0 or len(wrists) == 0
+                not_on_table = not (in_table_zone and not is_lifted and target_box[3] > (h * 0.60))
+                if bottle_raised and hand_holding and not_on_table:
+                    is_drinking_pose = True
+            elif self.target_lifted and wrist_dist_to_mouth < 150.0:
+                # Bottle lifted previously, hand currently held up at mouth to drink
                 is_drinking_pose = True
 
+        # Case 2: Occlusion-resistant drinking check:
+        # If user is in Step S03 (or just lifted bottle in S02), and hand/wrist is raised directly to mouth level
+        active_step_preview = self.steps[self.step_idx] if self.step_idx < len(self.steps) else None
+        if not is_drinking_pose and mouth_region is not None and len(wrists) > 0:
+            mx, my = mouth_region
+            for w in wrists:
+                wx, wy = w["point"]
+                # Wrist is right at mouth/chin level (within 135px radius, y around mouth)
+                if math.hypot(wx - mx, wy - my) < 135.0 and (my - 60.0 <= wy <= my + 110.0):
+                    if active_step_preview and active_step_preview.id in ["S02", "S03"] and (self.target_lifted or self.s02_lift_duration > 0.2):
+                        is_drinking_pose = True
+                        near_mouth = True
+                        break
+
         # Grasp detection for Step 4 release checking:
-        # Active grasp requires wrist directly touching/overlapping the bottle
         is_grasping_target = False
         if target_box is not None:
             bx1, by1, bx2, by2 = target_box
@@ -381,33 +492,44 @@ class YoloExperimentTracker:
                 dist_x = max(bx1 - wx, 0.0, wx - bx2)
                 dist_y = max(by1 - wy, 0.0, wy - by2)
                 dist = math.hypot(dist_x, dist_y)
-                if dist < max(28.0, b_width * 0.45):
+                # Actively grasping requires wrist directly on bottle body
+                if dist < max(20.0, b_width * 0.30) and (by1 - 10.0 <= wy <= by2 + 5.0):
                     is_grasping_target = True
 
         # Hands Released Condition:
-        # User has let go of the bottle if wrists are not actively gripping it,
-        # or if wrist is pulled away, or if no hands are visible in camera frame.
+        # User has let go of the bottle if:
+        # 1. No wrists detected in frame, OR
+        # 2. Not actively grasping the bottle, OR
+        # 3. Closest wrist distance is >= 25px, OR
+        # 4. Wrists are resting below the bottle (hands down on table / keyboard)
         hands_released = False
         if len(wrists) == 0:
             hands_released = True
-        elif closest_wrist_dist >= 35.0 or not is_grasping_target:
+        elif not is_grasping_target:
+            hands_released = True
+        elif closest_wrist_dist >= 25.0:
+            hands_released = True
+        elif target_box is not None and all(w["point"][1] > (target_box[3] + 5.0) for w in wrists):
             hands_released = True
 
         # Returned to Table Surface Condition:
         # Bottle has descended from mouth/drinking zone down onto table/desk plane
         is_returned_to_table = False
         if target_box is not None:
-            b_bottom = target_box[3]
             b_top = target_box[1]
-            away_from_mouth = (not near_mouth) and (dist_to_mouth > 95.0 or mouth_region is None or (mouth_region and b_top > (mouth_region[1] + 20.0)))
-            in_surface_zone = in_table_zone or (not is_lifted) or (b_bottom >= (ref_table - 40.0)) or (b_bottom > h * 0.50)
+            b_bottom = target_box[3]
+            b_center_y = (b_top + b_bottom) / 2.0
+
+            # Top of bottle is clearly below mouth (at least 35px below mouth level)
+            away_from_mouth = (not near_mouth) and (mouth_region is None or b_top > (mouth_region[1] + 35.0) or b_center_y > (mouth_region[1] + 65.0))
+
+            # In desk surface zone (lower frame, calibrated baseline, or not lifted)
+            in_surface_zone = in_table_zone or (b_bottom >= (ref_table - 50.0)) or (b_bottom > h * 0.42) or (b_top > h * 0.35) or (lift_delta < 30.0)
+
             if away_from_mouth and in_surface_zone:
                 is_returned_to_table = True
 
-        # Frame delta time for smooth hold accumulation
-        dt = (current_time - self.last_frame_time) if self.last_frame_time else 0.05
-        dt = min(max(dt, 0.01), 0.35)
-        self.last_frame_time = current_time
+        # Frame delta time already initialized for procedure hold timers
 
         # 4. Procedure Compliance State Machine with Strict Preconditions
         active_step = self.steps[self.step_idx] if self.step_idx < len(self.steps) else None
@@ -467,20 +589,28 @@ class YoloExperimentTracker:
                     # 1. Hand grasp detected on bottle (hand_contact_target or wrist < 90px)
                     # 2. Bottle lifted vertically off table surface (is_lifted == True and lift_delta > 25px)
                     # 3. Must maintain grasp + lift for >= 1.0 seconds (genuine physical hold)
-                    grasp_detected = hand_contact_target or (closest_wrist_dist < 90.0)
-                    if grasp_detected and is_lifted:
-                        if self.s02_lift_start is None:
-                            self.s02_lift_start = current_time
-                        self.s02_lift_duration += dt
-                        if self.s02_lift_duration >= self.S02_TARGET_S:
-                            self.target_lifted = True
-                            active_step.status = "completed"
-                            active_step.completed_at = current_time
-                            self._advance_step(current_time)
-                            active_step = self.steps[self.step_idx] if self.step_idx < len(self.steps) else None
+                    # If user directly moves to drinking pose, auto-complete S02
+                    if is_drinking_pose:
+                        self.target_lifted = True
+                        active_step.status = "completed"
+                        active_step.completed_at = current_time
+                        self._advance_step(current_time)
+                        active_step = self.steps[self.step_idx] if self.step_idx < len(self.steps) else None
                     else:
-                        self.s02_lift_start = None
-                        self.s02_lift_duration = max(0.0, self.s02_lift_duration - (dt * 0.5))
+                        grasp_detected = hand_contact_target or (closest_wrist_dist < 90.0)
+                        if grasp_detected and is_lifted:
+                            if self.s02_lift_start is None:
+                                self.s02_lift_start = current_time
+                            self.s02_lift_duration += dt
+                            if self.s02_lift_duration >= self.S02_TARGET_S:
+                                self.target_lifted = True
+                                active_step.status = "completed"
+                                active_step.completed_at = current_time
+                                self._advance_step(current_time)
+                                active_step = self.steps[self.step_idx] if self.step_idx < len(self.steps) else None
+                        else:
+                            self.s02_lift_start = None
+                            self.s02_lift_duration = max(0.0, self.s02_lift_duration - (dt * 0.4))
 
             # ==========================================
             # STEP 3: S03 - Drink water from bottle
@@ -497,7 +627,7 @@ class YoloExperimentTracker:
                         self.drink_hold_duration += dt
                         self.last_drinking_seen_time = current_time
 
-                        # Check if genuine drinking duration (target: 1.4s) is achieved
+                        # Check if genuine drinking duration (target: S03_TARGET_S = 0.8s) is achieved
                         if self.drink_hold_duration >= self.S03_TARGET_S:
                             self.water_consumed = True
                             active_step.status = "completed"
@@ -505,29 +635,20 @@ class YoloExperimentTracker:
                             self._advance_step(current_time)
                             active_step = self.steps[self.step_idx] if self.step_idx < len(self.steps) else None
                     else:
-                        # Allow brief pose flicker (up to 1.2s) without wiping accumulated drinking progress
-                        if (current_time - self.last_drinking_seen_time) > 1.2:
+                        # Allow generous pose flicker buffer (up to 1.8s) without wiping accumulated drinking progress
+                        if (current_time - self.last_drinking_seen_time) > 1.8:
                             self.drink_hold_start = None
-                            self.drink_hold_duration = max(0.0, self.drink_hold_duration - (dt * 0.3))
+                            self.drink_hold_duration = max(0.0, self.drink_hold_duration - (dt * 0.2))
 
                     # Check for genuine premature lowering / skipping:
-                    # Only if bottle is returned to table, hands released, and held there for >= 2.5s
-                    if in_table_zone and not is_lifted and not self.water_consumed and hands_released:
+                    # ONLY if the bottle was previously lifted high towards the face (target_lifted),
+                    # and then placed back down on table with hands released for >= 4.5 seconds continuously!
+                    if self.target_lifted and in_table_zone and not is_lifted and not self.water_consumed and hands_released:
                         if self.abandon_table_start is None:
                             self.abandon_table_start = current_time
 
                         abandon_time = current_time - self.abandon_table_start
-                        if abandon_time < 2.5:
-                            # Prompt user that drinking has not finished
-                            self._trigger_alert(
-                                step_id="S03",
-                                severity="caution",
-                                kind="incomplete",
-                                message="Drink water from bottle! Bottle was lowered before drinking was completed.",
-                                tts="Please drink water before returning the bottle.",
-                                t=current_time,
-                            )
-                        else:
+                        if abandon_time >= 4.5:
                             # User set bottle down on table and let go without drinking
                             self._trigger_alert(
                                 step_id="S03",
@@ -553,9 +674,9 @@ class YoloExperimentTracker:
                     pass
                 else:
                     # Requirements:
-                    # 1. Bottle returned to table surface (lowered from mouth, in table zone)
+                    # 1. Bottle returned to table surface (away from mouth, in surface zone)
                     # 2. Hands released and pulled away from bottle
-                    # 3. Stable released state accumulated for >= 1.0s
+                    # 3. Stable released state accumulated for >= S04_TARGET_S (0.6s)
                     if is_returned_to_table and hands_released:
                         if self.s04_settle_start is None:
                             self.s04_settle_start = current_time
@@ -577,10 +698,10 @@ class YoloExperimentTracker:
                                 t=current_time,
                             )
                     else:
-                        # Allow brief pose/detection flicker (up to 1.2s) without wiping accumulated progress
-                        if (current_time - self.last_s04_seen_time) > 1.2:
+                        # Allow brief pose/detection flicker (up to 1.5s) without wiping accumulated progress
+                        if self.last_s04_seen_time > 0 and (current_time - self.last_s04_seen_time) > 1.5:
                             self.s04_settle_start = None
-                            self.s04_settle_duration = max(0.0, self.s04_settle_duration - (dt * 0.4))
+                            self.s04_settle_duration = max(0.0, self.s04_settle_duration - (dt * 0.2))
 
         # 5. Draw High-Tech Mission Control Visual HUD (OpenCV)
         annotated = frame.copy()
@@ -602,6 +723,7 @@ class YoloExperimentTracker:
             is_returned_to_table=is_returned_to_table,
             hands_released=hands_released,
             closest_wrist_dist=closest_wrist_dist,
+            skeleton_data=skeleton_data,
         )
 
         # 6. Generate Telemetry Package
@@ -669,7 +791,18 @@ class YoloExperimentTracker:
             "geometry": {
                 "target_detected": target_box is not None,
                 "target_confidence": round(target_conf, 2),
-                "person_detected": person_detected,
+                "person_detected": skeleton_data["detected"],
+                "full_body_detected": skeleton_data["detected"] and skeleton_data["body_points_count"] >= 10,
+                "body_points_count": skeleton_data["body_points_count"],
+                "body_points_total": 17,
+                "posture_status": skeleton_data["posture_status"],
+                "posture_stability": skeleton_data["posture_stability"],
+                "torso_angle_deg": skeleton_data["torso_angle_deg"],
+                "body_velocity_px_s": skeleton_data["velocity_px_s"],
+                "body_zones": skeleton_data["zones"],
+                "arm_angles": skeleton_data["arm_angles"],
+                "anchored": skeleton_data["anchored"],
+                "skeleton": skeleton_data["keypoints"],
                 "hand_contact": hand_contact_target,
                 "closest_wrist_px": round(closest_wrist_dist, 1) if closest_wrist_dist < 9000 else None,
                 "is_lifted": is_lifted,
@@ -686,8 +819,9 @@ class YoloExperimentTracker:
                     "kind": self.recent_alerts[-1].kind,
                     "message": self.recent_alerts[-1].message,
                     "tts": self.recent_alerts[-1].spoken_tts,
+                    "timestamp": self.recent_alerts[-1].timestamp,
                 }
-                if self.recent_alerts
+                if (self.recent_alerts and (current_time - self.recent_alerts[-1].timestamp) < 4.0)
                 else None
             ),
             "alert_count": len(self.alerts),
@@ -714,6 +848,320 @@ class YoloExperimentTracker:
         if len(self.recent_alerts) > 5:
             self.recent_alerts.pop(0)
 
+    def _extract_full_body_skeleton(
+        self, frame: np.ndarray, current_time: float, dt: float, is_dummy_frame: bool = False
+    ) -> dict[str, Any]:
+        """Runs YOLOv8-pose to extract all 17 COCO keypoints, computes spaceflight posture,
+        torso inclination angles, arm flexion, and microgravity kinematic stability.
+        """
+        h, w = frame.shape[:2]
+        empty_skeleton: dict[str, Any] = {
+            "detected": False,
+            "keypoints": [],
+            "visible_indices": [],
+            "body_points_count": 0,
+            "body_points_total": 17,
+            "zones": {"head": 0, "torso": 0, "upper_limbs": 0, "lower_limbs": 0},
+            "wrists": [],
+            "mouth_region": None,
+            "sh_mid": None,
+            "hip_mid": None,
+            "torso_angle_deg": 0.0,
+            "arm_angles": {"left_elbow_deg": None, "right_elbow_deg": None},
+            "leg_angles": {"left_knee_deg": None, "right_knee_deg": None},
+            "posture_status": "NO_ASTRONAUT_DETECTED",
+            "posture_stability": "IDLE",
+            "centroid": None,
+            "velocity_px_s": 0.0,
+            "anchored": False,
+        }
+
+        if is_dummy_frame:
+            return empty_skeleton
+
+        pose_results = self.pose_model(frame, imgsz=320, verbose=False)[0]
+        if len(pose_results.keypoints) == 0 or pose_results.keypoints.data.shape[1] < 17:
+            return empty_skeleton
+
+        # Take primary detected person
+        kpts = pose_results.keypoints.data[0].cpu().numpy()
+
+        keypoints_list = []
+        visible_indices = set()
+        wrists = []
+
+        zone_counts = {"head": 0, "torso": 0, "upper_limbs": 0, "lower_limbs": 0}
+        sum_x, sum_y, count_pts = 0.0, 0.0, 0
+
+        for idx, name in enumerate(COCO_KEYPOINTS):
+            kx, ky, conf = float(kpts[idx][0]), float(kpts[idx][1]), float(kpts[idx][2])
+            is_vis = bool(conf >= 0.22 and 0 <= kx <= w and 0 <= ky <= h)
+            if is_vis:
+                visible_indices.add(idx)
+                sum_x += kx
+                sum_y += ky
+                count_pts += 1
+
+                if idx in [0, 1, 2, 3, 4]:
+                    zone_counts["head"] += 1
+                elif idx in [5, 6, 11, 12]:
+                    zone_counts["torso"] += 1
+                elif idx in [7, 8, 9, 10]:
+                    zone_counts["upper_limbs"] += 1
+                elif idx in [13, 14, 15, 16]:
+                    zone_counts["lower_limbs"] += 1
+
+                if idx == 9:
+                    wrists.append({"side": "left", "point": (kx, ky), "conf": round(conf, 3)})
+                elif idx == 10:
+                    wrists.append({"side": "right", "point": (kx, ky), "conf": round(conf, 3)})
+
+            keypoints_list.append({
+                "id": idx,
+                "name": name,
+                "x": round(kx, 1),
+                "y": round(ky, 1),
+                "conf": round(conf, 3),
+                "visible": is_vis,
+            })
+
+        if count_pts == 0:
+            return empty_skeleton
+
+        # 1. Mouth & Head Region Calculation
+        mouth_region = None
+        nose = kpts[0]
+        left_eye, right_eye = kpts[1], kpts[2]
+        left_ear, right_ear = kpts[3], kpts[4]
+        left_sh, right_sh = kpts[5], kpts[6]
+
+        if nose[2] > 0.20:
+            mouth_region = (float(nose[0]), float(nose[1]) + 28.0)
+            self.last_known_mouth = mouth_region
+            self.last_known_mouth_time = current_time
+        elif left_eye[2] > 0.20 and right_eye[2] > 0.20:
+            eye_mid_x = (float(left_eye[0]) + float(right_eye[0])) / 2.0
+            eye_mid_y = (float(left_eye[1]) + float(right_eye[1])) / 2.0
+            mouth_region = (eye_mid_x, eye_mid_y + 45.0)
+            self.last_known_mouth = mouth_region
+            self.last_known_mouth_time = current_time
+        elif left_eye[2] > 0.20:
+            mouth_region = (float(left_eye[0]) + 15.0, float(left_eye[1]) + 45.0)
+            self.last_known_mouth = mouth_region
+            self.last_known_mouth_time = current_time
+        elif right_eye[2] > 0.20:
+            mouth_region = (float(right_eye[0]) - 15.0, float(right_eye[1]) + 45.0)
+            self.last_known_mouth = mouth_region
+            self.last_known_mouth_time = current_time
+        elif left_ear[2] > 0.20 and right_ear[2] > 0.20:
+            ear_mid_x = (float(left_ear[0]) + float(right_ear[0])) / 2.0
+            ear_mid_y = (float(left_ear[1]) + float(right_ear[1])) / 2.0
+            mouth_region = (ear_mid_x, ear_mid_y + 35.0)
+            self.last_known_mouth = mouth_region
+            self.last_known_mouth_time = current_time
+        elif left_sh[2] > 0.20 and right_sh[2] > 0.20:
+            sh_x = (float(left_sh[0]) + float(right_sh[0])) / 2.0
+            sh_y = (float(left_sh[1]) + float(right_sh[1])) / 2.0
+            mouth_region = (sh_x, sh_y - 95.0)
+            self.last_known_mouth = mouth_region
+            self.last_known_mouth_time = current_time
+        elif self.last_known_mouth is not None and (current_time - self.last_known_mouth_time) < 15.0:
+            mouth_region = self.last_known_mouth
+
+        # 2. Torso / Spine Inclination Angle
+        torso_angle_deg = 0.0
+        sh_mid = None
+        if 5 in visible_indices and 6 in visible_indices:
+            sh_mid = ((float(kpts[5][0]) + float(kpts[6][0])) / 2.0, (float(kpts[5][1]) + float(kpts[6][1])) / 2.0)
+        elif 5 in visible_indices:
+            sh_mid = (float(kpts[5][0]), float(kpts[5][1]))
+        elif 6 in visible_indices:
+            sh_mid = (float(kpts[6][0]), float(kpts[6][1]))
+
+        hip_mid = None
+        if 11 in visible_indices and 12 in visible_indices:
+            hip_mid = ((float(kpts[11][0]) + float(kpts[12][0])) / 2.0, (float(kpts[11][1]) + float(kpts[12][1])) / 2.0)
+        elif 11 in visible_indices:
+            hip_mid = (float(kpts[11][0]), float(kpts[11][1]))
+        elif 12 in visible_indices:
+            hip_mid = (float(kpts[12][0]), float(kpts[12][1]))
+
+        if sh_mid is not None and hip_mid is not None:
+            dx = sh_mid[0] - hip_mid[0]
+            dy = hip_mid[1] - sh_mid[1]
+            torso_angle_deg = round(math.degrees(math.atan2(dx, max(1.0, dy))), 1)
+
+        # 3. Arm & Leg Joint Angles (Flexion / Extension)
+        def _calc_angle(pA, pB, pC):
+            v1 = (float(pA[0]) - float(pB[0]), float(pA[1]) - float(pB[1]))
+            v2 = (float(pC[0]) - float(pB[0]), float(pC[1]) - float(pB[1]))
+            mag1 = math.hypot(v1[0], v1[1])
+            mag2 = math.hypot(v2[0], v2[1])
+            if mag1 < 1e-3 or mag2 < 1e-3:
+                return None
+            cos_a = max(-1.0, min(1.0, (v1[0] * v2[0] + v1[1] * v2[1]) / (mag1 * mag2)))
+            return round(math.degrees(math.acos(cos_a)), 1)
+
+        l_elbow_angle = _calc_angle(kpts[5], kpts[7], kpts[9]) if (5 in visible_indices and 7 in visible_indices and 9 in visible_indices) else None
+        r_elbow_angle = _calc_angle(kpts[6], kpts[8], kpts[10]) if (6 in visible_indices and 8 in visible_indices and 10 in visible_indices) else None
+        l_knee_angle = _calc_angle(kpts[11], kpts[13], kpts[15]) if (11 in visible_indices and 13 in visible_indices and 15 in visible_indices) else None
+        r_knee_angle = _calc_angle(kpts[12], kpts[14], kpts[16]) if (12 in visible_indices and 14 in visible_indices and 16 in visible_indices) else None
+
+        # 4. Kinematic Centroid & Microgravity Velocity Tracking
+        centroid = (sum_x / count_pts, sum_y / count_pts)
+        inst_velocity = 0.0
+        if self.last_body_centroid is not None and dt > 0.005:
+            disp = math.hypot(centroid[0] - self.last_body_centroid[0], centroid[1] - self.last_body_centroid[1])
+            inst_velocity = disp / dt
+            self.body_motion_velocity_px = self.body_motion_velocity_px * 0.75 + inst_velocity * 0.25
+        self.last_body_centroid = centroid
+        self.last_centroid_time = current_time
+
+        if self.body_motion_velocity_px < 18.0:
+            posture_stability = "STABLE"
+        elif self.body_motion_velocity_px < 65.0:
+            posture_stability = "NOMINAL_MOTION"
+        else:
+            posture_stability = "RAPID_DISPLACEMENT"
+
+        # 5. Spaceflight Anchorage & Posture Classification
+        anchored = False
+        posture_status = "UPPER_BODY_ALIGNED"
+        if zone_counts["lower_limbs"] >= 1:
+            lower_pts = [kpts[idx] for idx in [13, 14, 15, 16] if idx in visible_indices]
+            avg_lower_y = sum(float(p[1]) for p in lower_pts) / len(lower_pts)
+            if avg_lower_y > (h * 0.65):
+                posture_status = "FOOT_RESTRAINT_ANCHORED"
+                anchored = True
+            else:
+                posture_status = "MICROGRAVITY_FLOATING"
+        elif zone_counts["torso"] >= 2 or zone_counts["upper_limbs"] >= 2:
+            if abs(torso_angle_deg) > 30.0:
+                posture_status = "POSTURAL_LEAN_EXCESS"
+            else:
+                posture_status = "UPPER_BODY_ALIGNED"
+        else:
+            posture_status = "HEAD_TRACKING"
+
+        skeleton_data = {
+            "detected": True,
+            "keypoints": keypoints_list,
+            "visible_indices": list(visible_indices),
+            "body_points_count": count_pts,
+            "body_points_total": 17,
+            "zones": zone_counts,
+            "wrists": wrists,
+            "mouth_region": mouth_region,
+            "sh_mid": sh_mid,
+            "hip_mid": hip_mid,
+            "torso_angle_deg": torso_angle_deg,
+            "arm_angles": {"left_elbow_deg": l_elbow_angle, "right_elbow_deg": r_elbow_angle},
+            "leg_angles": {"left_knee_deg": l_knee_angle, "right_knee_deg": r_knee_angle},
+            "posture_status": posture_status,
+            "posture_stability": posture_stability,
+            "centroid": (round(centroid[0], 1), round(centroid[1], 1)),
+            "velocity_px_s": round(self.body_motion_velocity_px, 1),
+            "anchored": anchored,
+        }
+
+        self.last_skeleton_data = skeleton_data
+        self.body_points_count = count_pts
+        self.posture_status = posture_status
+        self.posture_stability = posture_stability
+        self.torso_angle_deg = torso_angle_deg
+
+        return skeleton_data
+
+    def _render_skeletal_rig(self, img: np.ndarray, skeleton_data: dict[str, Any] | None) -> None:
+        """Renders high-aesthetic glowing cybernetic skeletal rig and biometric telemetry badge."""
+        if not skeleton_data or not skeleton_data.get("detected"):
+            return
+
+        h, w = img.shape[:2]
+        kpts = {kp["id"]: kp for kp in skeleton_data.get("keypoints", [])}
+        vis_set = set(skeleton_data.get("visible_indices", []))
+
+        overlay = img.copy()
+
+        # 1. Draw glowing bones
+        for idx1, idx2, bone_color in SKELETON_BONES:
+            if idx1 in vis_set and idx2 in vis_set:
+                p1 = (max(0, min(w - 1, int(kpts[idx1]["x"]))), max(0, min(h - 1, int(kpts[idx1]["y"]))))
+                p2 = (max(0, min(w - 1, int(kpts[idx2]["x"]))), max(0, min(h - 1, int(kpts[idx2]["y"]))))
+                # Outer glowing translucent tube
+                cv2.line(overlay, p1, p2, bone_color, 5, cv2.LINE_AA)
+                # Inner crisp laser core line
+                cv2.line(img, p1, p2, (255, 255, 255), 1, cv2.LINE_AA)
+
+        # Blend glow into image
+        cv2.addWeighted(overlay, 0.45, img, 0.55, 0, img)
+
+        # 2. Draw central spine line if mid shoulders and mid hips available
+        sh_mid = skeleton_data.get("sh_mid")
+        hip_mid = skeleton_data.get("hip_mid")
+        if sh_mid and hip_mid:
+            sp1 = (max(0, min(w - 1, int(sh_mid[0]))), max(0, min(h - 1, int(sh_mid[1]))))
+            sp2 = (max(0, min(w - 1, int(hip_mid[0]))), max(0, min(h - 1, int(hip_mid[1]))))
+            cv2.line(img, sp1, sp2, (0, 245, 255), 2, cv2.LINE_AA)
+            mid_sp = ((sp1[0] + sp2[0]) // 2, (sp1[1] + sp2[1]) // 2)
+            deg_str = f"SPINE: {abs(skeleton_data.get('torso_angle_deg', 0.0))} deg"
+            cv2.putText(img, deg_str, (mid_sp[0] + 8, mid_sp[1]), cv2.FONT_HERSHEY_SIMPLEX, 0.34, (0, 245, 255), 1, cv2.LINE_AA)
+
+        # 3. Draw joint nodes & reticles
+        for idx in vis_set:
+            kp = kpts[idx]
+            kx = max(0, min(w - 1, int(kp["x"])))
+            ky = max(0, min(h - 1, int(kp["y"])))
+
+            # Ring colors per zone
+            if idx in [0, 1, 2, 3, 4]:
+                ring_color = (255, 230, 0)   # Cyan (Head)
+            elif idx in [5, 6]:
+                ring_color = (0, 240, 255)   # Gold (Shoulders)
+            elif idx in [7, 8, 9, 10]:
+                ring_color = (60, 240, 120)  # Green (Elbows/Wrists)
+            elif idx in [11, 12]:
+                ring_color = (0, 180, 255)   # Amber (Hips)
+            else:
+                ring_color = (230, 80, 200)  # Magenta (Knees/Ankles)
+
+            cv2.circle(img, (kx, ky), 5, ring_color, 1, cv2.LINE_AA)
+            cv2.circle(img, (kx, ky), 2, (255, 255, 255), -1, cv2.LINE_AA)
+
+            # Specific joint callouts:
+            if idx == 9:
+                cv2.putText(img, "L-HAND", (kx - 48, ky - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.32, (60, 240, 120), 1, cv2.LINE_AA)
+            elif idx == 10:
+                cv2.putText(img, "R-HAND", (kx + 8, ky - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.32, (60, 240, 120), 1, cv2.LINE_AA)
+            elif idx == 7 and skeleton_data.get("arm_angles", {}).get("left_elbow_deg"):
+                cv2.putText(img, f"{int(skeleton_data['arm_angles']['left_elbow_deg'])} deg", (kx - 38, ky + 12), cv2.FONT_HERSHEY_SIMPLEX, 0.30, (180, 240, 180), 1, cv2.LINE_AA)
+            elif idx == 8 and skeleton_data.get("arm_angles", {}).get("right_elbow_deg"):
+                cv2.putText(img, f"{int(skeleton_data['arm_angles']['right_elbow_deg'])} deg", (kx + 8, ky + 12), cv2.FONT_HERSHEY_SIMPLEX, 0.30, (180, 240, 180), 1, cv2.LINE_AA)
+            elif idx in [15, 16] and skeleton_data.get("anchored"):
+                cv2.putText(img, "ANCHOR", (kx - 18, ky + 16), cv2.FONT_HERSHEY_SIMPLEX, 0.30, (230, 80, 200), 1, cv2.LINE_AA)
+
+        # 4. Biometric Telemetry Matrix Card
+        pts_count = skeleton_data.get("body_points_count", 0)
+        posture = skeleton_data.get("posture_status", "NOMINAL")
+        vel = skeleton_data.get("velocity_px_s", 0.0)
+        torso_ang = skeleton_data.get("torso_angle_deg", 0.0)
+
+        card_w, card_h = 245, 72
+        cx1, cy1 = w - card_w - 12, 60
+        card_overlay = img.copy()
+        cv2.rectangle(card_overlay, (cx1, cy1), (cx1 + card_w, cy1 + card_h), (12, 16, 24), -1)
+        cv2.addWeighted(card_overlay, 0.82, img, 0.18, 0, img)
+        cv2.rectangle(img, (cx1, cy1), (cx1 + card_w, cy1 + card_h), (60, 180, 240), 1)
+
+        cv2.putText(img, f"ASTRONAUT SKELETON: {pts_count}/17 PTS", (cx1 + 8, cy1 + 16), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (0, 240, 255), 1, cv2.LINE_AA)
+        status_col = (60, 230, 100) if "ANCHORED" in posture or "ALIGNED" in posture else ((240, 180, 40) if "FLOATING" in posture else (80, 120, 255))
+        cv2.putText(img, f"POSTURE: {posture}", (cx1 + 8, cy1 + 33), cv2.FONT_HERSHEY_SIMPLEX, 0.33, status_col, 1, cv2.LINE_AA)
+        cv2.putText(img, f"SPINE TILT: {abs(torso_ang)} deg | DRIFT: {vel} px/s", (cx1 + 8, cy1 + 49), cv2.FONT_HERSHEY_SIMPLEX, 0.32, (200, 215, 230), 1, cv2.LINE_AA)
+
+        zones = skeleton_data.get("zones", {})
+        zone_str = f"H:{zones.get('head',0)}/5 A:{zones.get('upper_limbs',0)}/4 T:{zones.get('torso',0)}/4 L:{zones.get('lower_limbs',0)}/4"
+        cv2.putText(img, zone_str, (cx1 + 8, cy1 + 65), cv2.FONT_HERSHEY_SIMPLEX, 0.30, (140, 170, 200), 1, cv2.LINE_AA)
+
     def _render_hud(
         self,
         img: np.ndarray,
@@ -733,9 +1181,14 @@ class YoloExperimentTracker:
         is_returned_to_table: bool = False,
         hands_released: bool = False,
         closest_wrist_dist: float = 9999.0,
+        skeleton_data: dict[str, Any] | None = None,
     ) -> None:
         """Renders high-aesthetic Mission Control HUD directly on the OpenCV frame."""
         h, w = img.shape[:2]
+
+        # 0. Render Full-Body Skeletal Rig & Biometric Telemetry Card
+        if skeleton_data is not None:
+            self._render_skeletal_rig(img, skeleton_data)
 
         # Draw Target Bounding Box
         if target_box is not None:
@@ -935,4 +1388,651 @@ class YoloExperimentTracker:
             cv2.putText(img, step_prompt, (25, h - 25), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (240, 245, 250), 1, cv2.LINE_AA)
         else:
             cv2.putText(img, "All procedure steps verified successfully.", (25, h - 25), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (80, 220, 120), 1, cv2.LINE_AA)
+
+    def _process_bcx1_frame(
+        self, frame: np.ndarray, current_time: float, is_dummy_frame: bool
+    ) -> tuple[np.ndarray, dict[str, Any]]:
+        """Processes one video frame for BCX-1: Two-Box Collision in Container."""
+        h, w = frame.shape[:2]
+        dt = (current_time - self.last_frame_time) if self.last_frame_time else 0.05
+        dt = min(max(dt, 0.01), 0.35)
+        self.last_frame_time = current_time
+
+        # Extract Full-Body 17-Point Skeleton & Posture
+        skeleton_data = self._extract_full_body_skeleton(frame, current_time, dt, is_dummy_frame)
+
+        # 1. Dual-Space Color Segmentation for Red and Yellow Boxes
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        b_ch, g_ch, r_ch = cv2.split(frame)
+        k_clean = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+
+        # --- RED DETECTION (Dual HSV range + RGB Red Dominance) ---
+        mask_r1 = cv2.inRange(hsv, np.array([0, 45, 40]), np.array([12, 255, 255]))
+        mask_r2 = cv2.inRange(hsv, np.array([165, 45, 40]), np.array([180, 255, 255]))
+        hsv_red = cv2.bitwise_or(mask_r1, mask_r2)
+
+        # Red dominance: R must be significantly higher than G and B
+        r_int = r_ch.astype(np.int16)
+        g_int = g_ch.astype(np.int16)
+        b_int = b_ch.astype(np.int16)
+        rgb_red = ((r_int - g_int > 18) & (r_int - b_int > 18) & (r_ch > 55)).astype(np.uint8) * 255
+
+        mask_red = cv2.bitwise_and(hsv_red, rgb_red)
+        mask_red = cv2.morphologyEx(mask_red, cv2.MORPH_OPEN, k_clean)
+        mask_red = cv2.morphologyEx(mask_red, cv2.MORPH_CLOSE, k_clean)
+
+        # --- YELLOW DETECTION (HSV [14, 40] + RGB Yellow Dominance) ---
+        hsv_yellow = cv2.inRange(hsv, np.array([14, 45, 50]), np.array([40, 255, 255]))
+        rgb_yellow = (
+            (r_ch > 65)
+            & (g_ch > 60)
+            & (r_int - b_int > 25)
+            & (g_int - b_int > 20)
+            & (np.abs(r_int - g_int) < 70)
+        ).astype(np.uint8) * 255
+
+        mask_yellow = cv2.bitwise_and(hsv_yellow, rgb_yellow)
+        mask_yellow = cv2.morphologyEx(mask_yellow, cv2.MORPH_OPEN, k_clean)
+        mask_yellow = cv2.morphologyEx(mask_yellow, cv2.MORPH_CLOSE, k_clean)
+
+        # Contour extraction for Red Box
+        cnts_red, _ = cv2.findContours(mask_red, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        red_box = None
+        if cnts_red:
+            best_c = max(cnts_red, key=cv2.contourArea)
+            if cv2.contourArea(best_c) >= 280.0:
+                rx, ry, rw, rh = cv2.boundingRect(best_c)
+                red_box = (float(rx), float(ry), float(rx + rw), float(ry + rh))
+                self.bcx1_last_red_box = red_box
+                self.bcx1_last_seen_red_time = current_time
+        elif self.bcx1_last_red_box and (current_time - self.bcx1_last_seen_red_time) < 1.0:
+            # Grace period for hand occlusion during handling
+            red_box = self.bcx1_last_red_box
+
+        # Contour extraction for Yellow Box
+        cnts_yellow, _ = cv2.findContours(mask_yellow, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        yellow_box = None
+        if cnts_yellow:
+            best_y = max(cnts_yellow, key=cv2.contourArea)
+            if cv2.contourArea(best_y) >= 280.0:
+                yx, yy, yw, yh = cv2.boundingRect(best_y)
+                yellow_box = (float(yx), float(yy), float(yx + yw), float(ry if False else yy + yh))
+                self.bcx1_last_yellow_box = yellow_box
+                self.bcx1_last_seen_yellow_time = current_time
+        elif self.bcx1_last_yellow_box and (current_time - self.bcx1_last_seen_yellow_time) < 1.0:
+            # Grace period for hand occlusion during handling
+            yellow_box = self.bcx1_last_yellow_box
+
+        # 2. Outer Container Box Detection & Exponential Moving Average (EMA) Locking
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        edges = cv2.Canny(blurred, 30, 110)
+        k_cont = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7))
+        edges_sealed = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, k_cont)
+        cnts_edges, _ = cv2.findContours(edges_sealed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        candidate_container = None
+        best_cont_area = 0.0
+        for c in cnts_edges:
+            ox, oy, ow, oh = cv2.boundingRect(c)
+            b_area = float(ow * oh)
+            c_area = cv2.contourArea(c)
+            eff_area = max(b_area, c_area)
+            if 15000.0 <= eff_area <= 280000.0 and ow >= 150 and oh >= 110:
+                if (float(ow) / max(1.0, float(oh))) < 3.5:
+                    if eff_area > best_cont_area:
+                        best_cont_area = eff_area
+                        candidate_container = (float(ox), float(oy), float(ox + ow), float(oy + oh))
+
+        if candidate_container is not None:
+            if self.bcx1_locked_container is None:
+                self.bcx1_locked_container = candidate_container
+            else:
+                # Smooth coordinates with EMA so box never flickers or detaches
+                prev = self.bcx1_locked_container
+                smoothed = (
+                    prev[0] * 0.85 + candidate_container[0] * 0.15,
+                    prev[1] * 0.85 + candidate_container[1] * 0.15,
+                    prev[2] * 0.85 + candidate_container[2] * 0.15,
+                    prev[3] * 0.85 + candidate_container[3] * 0.15,
+                )
+                self.bcx1_locked_container = smoothed
+            self.bcx1_container_locked = True
+        elif self.bcx1_locked_container is None:
+            # Default workspace container if not yet detected
+            self.bcx1_locked_container = (60.0, 50.0, float(w - 60), float(h - 70))
+
+        outer_box = self.bcx1_locked_container
+        self.bcx1_outer_box = outer_box
+        self.bcx1_red_box = red_box
+        self.bcx1_yellow_box = yellow_box
+
+        # Containment logic: center of box inside outer_box with 16px margin
+        ox1, oy1, ox2, oy2 = outer_box
+        red_inside = False
+        if red_box:
+            rcx = (red_box[0] + red_box[2]) / 2.0
+            rcy = (red_box[1] + red_box[3]) / 2.0
+            red_inside = (ox1 - 16.0 <= rcx <= ox2 + 16.0) and (oy1 - 16.0 <= rcy <= oy2 + 16.0)
+        self.bcx1_red_inside = red_inside
+
+        yellow_inside = False
+        if yellow_box:
+            ycx = (yellow_box[0] + yellow_box[2]) / 2.0
+            ycy = (yellow_box[1] + yellow_box[3]) / 2.0
+            yellow_inside = (ox1 - 16.0 <= ycx <= ox2 + 16.0) and (oy1 - 16.0 <= ycy <= oy2 + 16.0)
+        self.bcx1_yellow_inside = yellow_inside
+
+        # 3. Collision & Distance Dynamics
+        dist_px = 999.0
+        is_colliding = False
+        boxes_overlap = False
+        if red_box and yellow_box:
+            rx1, ry1, rx2, ry2 = red_box
+            yx1, yy1, yx2, yy2 = yellow_box
+            dx = max(0.0, max(rx1 - yx2, yx1 - rx2))
+            dy = max(0.0, max(ry1 - yy2, yy1 - ry2))
+            dist_px = math.hypot(dx, dy)
+            boxes_overlap = (max(rx1, yx1) < min(rx2, yx2)) and (max(ry1, yy1) < min(ry2, yy2))
+            if dist_px <= 20.0 or boxes_overlap:
+                is_colliding = True
+
+        self.bcx1_distance_px = dist_px
+        self.bcx1_collision = is_colliding
+
+        # 4. Procedure Compliance State Machine for 6-Step BCX-1 Protocol
+        active_step = self.steps[self.step_idx] if self.step_idx < len(self.steps) else None
+
+        if active_step is not None and not is_dummy_frame:
+            active_step.elapsed_s = current_time - (active_step.started_at or current_time)
+
+            # S01: Identify Bigger Container Box
+            if active_step.id == "S01":
+                container_detected = self.bcx1_container_locked or (candidate_container is not None)
+                if container_detected:
+                    self.bcx1_s01_hold_duration += dt
+                    if self.bcx1_s01_hold_duration >= 0.8:
+                        active_step.status = "completed"
+                        active_step.completed_at = current_time
+                        self._advance_step(current_time)
+                        active_step = self.steps[self.step_idx] if self.step_idx < len(self.steps) else None
+                        self._trigger_alert(
+                            step_id="S01",
+                            severity="info",
+                            kind="nominal_step",
+                            message="Container box identified and locked. Proceed to Step Two: Present Red and Yellow boxes to verify colors.",
+                            tts="Container box identified and locked. Proceed to step two: present the Red and Yellow boxes to verify colors.",
+                            t=current_time,
+                        )
+                else:
+                    self.bcx1_s01_hold_duration = max(0.0, self.bcx1_s01_hold_duration - (dt * 0.5))
+
+            # S02: Detect & Verify Box Colors (Red & Yellow)
+            elif active_step.id == "S02":
+                # Check for premature placement before color calibration
+                if (red_inside or yellow_inside) and not self.bcx1_colors_verified:
+                    if not (red_box and yellow_box):
+                        self._trigger_alert(
+                            step_id="S02",
+                            severity="caution",
+                            kind="skipped",
+                            message="Present both Red and Yellow boxes to the camera to calibrate colors before placing them.",
+                            tts="Caution: Present both the Red and Yellow boxes to the camera to verify colors first.",
+                            t=current_time,
+                        )
+
+                both_colors_present = (red_box is not None) and (yellow_box is not None)
+                if both_colors_present:
+                    self.bcx1_s02_hold_duration += dt
+                    if self.bcx1_s02_hold_duration >= 0.8:
+                        self.bcx1_colors_verified = True
+                        active_step.status = "completed"
+                        active_step.completed_at = current_time
+                        self._advance_step(current_time)
+                        active_step = self.steps[self.step_idx] if self.step_idx < len(self.steps) else None
+                        self._trigger_alert(
+                            step_id="S02",
+                            severity="info",
+                            kind="nominal_step",
+                            message="Red and Yellow box colors verified accurately. Proceed to Step Three: Place Red Box into container.",
+                            tts="Colors verified accurately. Proceed to step three: place the Red Box inside the container.",
+                            t=current_time,
+                        )
+                else:
+                    self.bcx1_s02_hold_duration = max(0.0, self.bcx1_s02_hold_duration - (dt * 0.4))
+
+            # S03: Place Red Box into Container
+            elif active_step.id == "S03":
+                # Check if Yellow box placed prematurely without Red box
+                if yellow_inside and not red_inside:
+                    self._trigger_alert(
+                        step_id="S03",
+                        severity="critical",
+                        kind="out_of_order",
+                        message="Out of order! Step S03 requires placing Red Box first. Yellow box detected inside.",
+                        tts="Warning: Step out of order. Place the Red Box inside the container first.",
+                        t=current_time,
+                    )
+                elif red_inside:
+                    self.bcx1_s03_hold_duration += dt
+                    if self.bcx1_s03_hold_duration >= 0.8:
+                        self.bcx1_red_placed = True
+                        active_step.status = "completed"
+                        active_step.completed_at = current_time
+                        self._advance_step(current_time)
+                        active_step = self.steps[self.step_idx] if self.step_idx < len(self.steps) else None
+                        self._trigger_alert(
+                            step_id="S03",
+                            severity="info",
+                            kind="nominal_step",
+                            message="Red Box verified inside container. Proceed to Step Four: Place Yellow Box into container.",
+                            tts="Step three verified. Red Box is inside container. Proceed to step four: place the Yellow Box inside.",
+                            t=current_time,
+                        )
+                else:
+                    self.bcx1_s03_hold_duration = max(0.0, self.bcx1_s03_hold_duration - (dt * 0.4))
+
+            # S04: Place Yellow Box into Container (separated)
+            elif active_step.id == "S04":
+                # Check premature collision
+                if is_colliding and (red_inside or yellow_inside):
+                    self._trigger_alert(
+                        step_id="S04",
+                        severity="caution",
+                        kind="out_of_order",
+                        message="Premature Collision! Place Yellow Box separated from Red Box before colliding.",
+                        tts="Caution: Place the Yellow Box inside separated from the Red Box before colliding.",
+                        t=current_time,
+                    )
+                elif yellow_inside and red_inside and dist_px > 25.0:
+                    self.bcx1_s04_hold_duration += dt
+                    if self.bcx1_s04_hold_duration >= 0.8:
+                        self.bcx1_yellow_placed = True
+                        active_step.status = "completed"
+                        active_step.completed_at = current_time
+                        self._advance_step(current_time)
+                        active_step = self.steps[self.step_idx] if self.step_idx < len(self.steps) else None
+                        self._trigger_alert(
+                            step_id="S04",
+                            severity="info",
+                            kind="nominal_step",
+                            message="Yellow Box placed and verified separated. Proceed to Step Five: Bring boxes together to collide.",
+                            tts="Step four verified. Both boxes inside container. Proceed to step five: bring boxes together to collide.",
+                            t=current_time,
+                        )
+                else:
+                    self.bcx1_s04_hold_duration = max(0.0, self.bcx1_s04_hold_duration - (dt * 0.4))
+
+            # S05: Collide Red and Yellow Boxes
+            elif active_step.id == "S05":
+                # Check out-of-bounds hazard: colliding outside container
+                if is_colliding and not (red_inside and yellow_inside):
+                    self._trigger_alert(
+                        step_id="S05",
+                        severity="critical",
+                        kind="hazard",
+                        message="Out-of-Bounds Hazard! Collision must take place inside the container.",
+                        tts="Hazard warning: Collision must occur inside the container.",
+                        t=current_time,
+                    )
+                elif is_colliding and red_inside and yellow_inside:
+                    self.bcx1_collision_hold_duration += dt
+                    self.bcx1_last_collision_time = current_time
+                    if self.bcx1_collision_hold_duration >= 0.8:
+                        active_step.status = "completed"
+                        active_step.completed_at = current_time
+                        self._advance_step(current_time)
+                        active_step = self.steps[self.step_idx] if self.step_idx < len(self.steps) else None
+                        self._trigger_alert(
+                            step_id="S05",
+                            severity="info",
+                            kind="collision_confirmed",
+                            message="Box Collision Confirmed! Contact verified. Proceed to Step Six: Separate boxes by at least 20px.",
+                            tts="Collision confirmed and verified. Proceed to step six: separate the boxes.",
+                            t=current_time,
+                        )
+                else:
+                    if (current_time - self.bcx1_last_collision_time) > 0.8:
+                        self.bcx1_collision_hold_duration = max(0.0, self.bcx1_collision_hold_duration - (dt * 0.4))
+
+            # S06: Separate Boxes & Confirm
+            elif active_step.id == "S06":
+                is_separated = (not is_colliding) and (dist_px >= 20.0 or (red_box is not None and yellow_box is not None and dist_px > 18.0 and not boxes_overlap))
+
+                if is_separated:
+                    self.bcx1_last_separation_time = current_time
+                    self.bcx1_s06_hold_duration += dt
+                    if self.bcx1_s06_hold_duration >= 0.7:
+                        self.protocol_complete = True
+                        active_step.status = "completed"
+                        active_step.completed_at = current_time
+                        self._advance_step(current_time)
+                        active_step = self.steps[self.step_idx] if self.step_idx < len(self.steps) else None
+                        self._trigger_alert(
+                            step_id="S06",
+                            severity="info",
+                            kind="nominal_completion",
+                            message="BCX-1 Protocol Complete! Two-box collision dynamics and separation verified nominal.",
+                            tts="Two-box collision experiment complete. All six steps verified nominal.",
+                            t=current_time,
+                        )
+                else:
+                    # Provide grace period against brief hand occlusion while pulling boxes apart
+                    if (current_time - self.bcx1_last_separation_time) < 0.6 and not is_colliding:
+                        pass
+                    else:
+                        self.bcx1_s06_hold_duration = max(0.0, self.bcx1_s06_hold_duration - (dt * 0.3))
+
+        # 5. Draw High-Tech Mission Control Visual HUD for BCX-1
+        annotated = frame.copy()
+        self._render_bcx1_hud(
+            annotated,
+            outer_box=outer_box,
+            red_box=red_box,
+            yellow_box=yellow_box,
+            red_inside=red_inside,
+            yellow_inside=yellow_inside,
+            is_colliding=is_colliding,
+            dist_px=dist_px,
+            active_step=active_step,
+            current_time=current_time,
+            skeleton_data=skeleton_data,
+        )
+
+        # 6. Format Telemetry
+        completed_count = sum(1 for s in self.steps if s.status == "completed")
+        compliance_pct = int((completed_count / len(self.steps)) * 100) if self.steps else 100
+
+        step_telemetry = []
+        for s in self.steps:
+            is_verifying = False
+            pct = 0
+            if s.status == "completed":
+                pct = 100
+            elif s.status == "active":
+                if s.id == "S01":
+                    is_verifying = self.bcx1_s01_hold_duration > 0
+                    pct = min(100, int((self.bcx1_s01_hold_duration / 0.8) * 100))
+                elif s.id == "S02":
+                    is_verifying = (red_box is not None) and (yellow_box is not None)
+                    pct = min(100, int((self.bcx1_s02_hold_duration / 0.8) * 100))
+                elif s.id == "S03":
+                    is_verifying = red_inside
+                    pct = min(100, int((self.bcx1_s03_hold_duration / 0.8) * 100))
+                elif s.id == "S04":
+                    is_verifying = yellow_inside and dist_px > 25.0
+                    pct = min(100, int((self.bcx1_s04_hold_duration / 0.8) * 100))
+                elif s.id == "S05":
+                    is_verifying = is_colliding
+                    pct = min(100, int((self.bcx1_collision_hold_duration / 0.8) * 100))
+                elif s.id == "S06":
+                    is_verifying = (not is_colliding) and (dist_px >= 20.0)
+                    pct = min(100, int((self.bcx1_s06_hold_duration / 0.7) * 100))
+
+            step_telemetry.append({
+                "id": s.id,
+                "name": s.name,
+                "prompt": s.prompt,
+                "status": s.status,
+                "elapsed_s": round(s.elapsed_s, 1),
+                "is_verifying": is_verifying,
+                "verification_pct": pct,
+            })
+
+        # Alert expiry: only emit recent_alert if within 4.0 seconds of generation
+        recent_alert_payload = None
+        if self.recent_alerts and (current_time - self.recent_alerts[-1].timestamp) < 4.0:
+            a = self.recent_alerts[-1]
+            recent_alert_payload = {
+                "step_id": a.step_id,
+                "severity": a.severity,
+                "kind": a.kind,
+                "message": a.message,
+                "tts": a.spoken_tts,
+                "timestamp": a.timestamp,
+            }
+
+        telemetry = {
+            "experiment_id": self.experiment_id,
+            "experiment_title": self.title,
+            "rack_id": self.rack_id,
+            "frame_idx": self.frame_count,
+            "active_step_id": active_step.id if active_step else "DONE",
+            "active_step_name": active_step.name if active_step else "Protocol Completed",
+            "prompt": active_step.prompt if active_step else "Two-box collision experiment completed nominally.",
+            "compliance_score": compliance_pct,
+            "is_complete": self.protocol_complete,
+            "drinking": {  # Fallback field so frontend doesn't crash on null
+                "in_progress": is_colliding,
+                "hold_duration_s": round(self.bcx1_collision_hold_duration, 2),
+                "target_duration_s": 0.8,
+                "progress_pct": min(100, int((self.bcx1_collision_hold_duration / 0.8) * 100)),
+                "water_consumed": self.protocol_complete,
+            },
+            "settle": {
+                "in_progress": (not is_colliding) and (dist_px >= 20.0),
+                "is_returned": red_inside and yellow_inside,
+                "hands_released": True,
+                "hold_duration_s": round(self.bcx1_s06_hold_duration, 2),
+                "target_duration_s": 0.7,
+                "progress_pct": min(100, int((self.bcx1_s06_hold_duration / 0.7) * 100)),
+                "is_complete": self.protocol_complete,
+            },
+            "collision": {
+                "in_progress": is_colliding,
+                "is_colliding": is_colliding,
+                "distance_px": round(dist_px, 1) if dist_px < 900 else None,
+                "red_inside": red_inside,
+                "yellow_inside": yellow_inside,
+                "is_separated": (not is_colliding) and (dist_px >= 20.0),
+                "hold_duration_s": round(self.bcx1_collision_hold_duration, 2),
+                "target_duration_s": 0.8,
+                "progress_pct": min(100, int((self.bcx1_collision_hold_duration / 0.8) * 100)),
+                "separation_hold_s": round(self.bcx1_s06_hold_duration, 2),
+                "separation_target_s": 0.7,
+                "separation_pct": min(100, int((self.bcx1_s06_hold_duration / 0.7) * 100)),
+            },
+            "steps": step_telemetry,
+            "geometry": {
+                "target_detected": red_box is not None or yellow_box is not None,
+                "target_confidence": 0.95 if (red_box or yellow_box) else 0.0,
+                "person_detected": skeleton_data["detected"],
+                "full_body_detected": skeleton_data["detected"] and skeleton_data["body_points_count"] >= 10,
+                "body_points_count": skeleton_data["body_points_count"],
+                "body_points_total": 17,
+                "posture_status": skeleton_data["posture_status"],
+                "posture_stability": skeleton_data["posture_stability"],
+                "torso_angle_deg": skeleton_data["torso_angle_deg"],
+                "body_velocity_px_s": skeleton_data["velocity_px_s"],
+                "body_zones": skeleton_data["zones"],
+                "arm_angles": skeleton_data["arm_angles"],
+                "anchored": skeleton_data["anchored"],
+                "skeleton": skeleton_data["keypoints"],
+                "hand_contact": False,
+                "closest_wrist_px": None,
+                "is_lifted": False,
+                "lift_delta_px": 0.0,
+                "near_mouth": False,
+                "is_drinking_pose": is_colliding,
+                "in_table_zone": True,
+                "dist_to_mouth_px": None,
+                "outer_box_detected": outer_box is not None,
+                "container_locked": self.bcx1_container_locked,
+                "red_box_detected": red_box is not None,
+                "yellow_box_detected": yellow_box is not None,
+                "red_inside": red_inside,
+                "yellow_inside": yellow_inside,
+                "distance_px": round(dist_px, 1) if dist_px < 900 else None,
+                "is_colliding": is_colliding,
+            },
+            "recent_alert": recent_alert_payload,
+            "alert_count": len(self.alerts),
+        }
+
+        return annotated, telemetry
+
+    def _render_bcx1_hud(
+        self,
+        img: np.ndarray,
+        outer_box: tuple[float, float, float, float] | None,
+        red_box: tuple[float, float, float, float] | None,
+        yellow_box: tuple[float, float, float, float] | None,
+        red_inside: bool,
+        yellow_inside: bool,
+        is_colliding: bool,
+        dist_px: float,
+        active_step: StepState | None,
+        current_time: float,
+        skeleton_data: dict[str, Any] | None = None,
+    ) -> None:
+        """Renders Mission Control Visual HUD for BCX-1 Two-Box Collision."""
+        h, w = img.shape[:2]
+
+        # 0. Render Full-Body Skeletal Rig & Biometric Telemetry Card
+        if skeleton_data is not None:
+            self._render_skeletal_rig(img, skeleton_data)
+
+        overlay = img.copy()
+
+        # Top Header Bar
+        cv2.rectangle(overlay, (0, 0), (w, 52), (10, 15, 22), -1)
+        cv2.addWeighted(overlay, 0.85, img, 0.15, 0, img)
+        cv2.line(img, (0, 52), (w, 52), (40, 180, 240), 1)
+
+        cv2.putText(img, "PARIKSHAK MISSION CONTROL", (18, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.44, (240, 245, 250), 1, cv2.LINE_AA)
+        cv2.putText(img, "EXP: BCX-1 (RED & YELLOW BOX COLLISION)", (18, 42), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (40, 200, 255), 2, cv2.LINE_AA)
+
+        # Status badge top right
+        status_text = "● VERIFYING COLLISION" if is_colliding else ("● SEPARATED" if dist_px >= 20.0 and dist_px < 900 else "● TRACKING ACTIVE")
+        status_color = (40, 140, 255) if is_colliding else ((60, 230, 100) if dist_px >= 20.0 and dist_px < 900 else (100, 200, 255))
+        cv2.putText(img, status_text, (w - 230, 32), cv2.FONT_HERSHEY_SIMPLEX, 0.45, status_color, 2, cv2.LINE_AA)
+
+        # 1. Draw Outer Container Box
+        if outer_box is not None:
+            ox1, oy1, ox2, oy2 = [int(v) for v in outer_box]
+            cv2.rectangle(img, (ox1, oy1), (ox2, oy2), (255, 200, 0), 2)
+            c_len = 20
+            for cx, cy in [(ox1, oy1), (ox2, oy1), (ox1, oy2), (ox2, oy2)]:
+                dx = c_len if cx == ox1 else -c_len
+                dy = c_len if cy == oy1 else -c_len
+                cv2.line(img, (cx, cy), (cx + dx, cy), (255, 230, 80), 3)
+                cv2.line(img, (cx, cy), (cx, cy + dy), (255, 230, 80), 3)
+
+            lock_status = "LOCKED" if self.bcx1_container_locked else "SEARCHING"
+            cv2.rectangle(img, (ox1, oy1 - 22), (ox1 + 225, oy1), (255, 200, 0), -1)
+            cv2.putText(img, f"CONTAINER BOX [{lock_status}]", (ox1 + 6, oy1 - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.36, (10, 15, 25), 1, cv2.LINE_AA)
+
+        # 2. Draw Red Box
+        rcx, rcy = None, None
+        if red_box is not None:
+            rx1, ry1, rx2, ry2 = [int(v) for v in red_box]
+            rcx, rcy = (rx1 + rx2) // 2, (ry1 + ry2) // 2
+            cv2.rectangle(img, (rx1, ry1), (rx2, ry2), (0, 0, 255), 2)
+            cv2.circle(img, (rcx, rcy), 5, (0, 0, 255), -1)
+            badge_lbl = "RED BOX: IN CONTAINER" if red_inside else "RED BOX: OUTSIDE"
+            cv2.rectangle(img, (rx1, ry1 - 20), (rx1 + 160, ry1), (0, 0, 200), -1)
+            cv2.putText(img, badge_lbl, (rx1 + 5, ry1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.36, (255, 255, 255), 1, cv2.LINE_AA)
+
+        # 3. Draw Yellow Box
+        ycx, ycy = None, None
+        if yellow_box is not None:
+            yx1, yy1, yx2, yy2 = [int(v) for v in yellow_box]
+            ycx, ycy = (yx1 + yx2) // 2, (yy1 + yy2) // 2
+            cv2.rectangle(img, (yx1, yy1), (yx2, yy2), (0, 230, 255), 2)
+            cv2.circle(img, (ycx, ycy), 5, (0, 230, 255), -1)
+            badge_lbl = "YELLOW BOX: IN CONTAINER" if yellow_inside else "YELLOW BOX: OUTSIDE"
+            cv2.rectangle(img, (yx1, yy1 - 20), (yx1 + 180, yy1), (0, 200, 220), -1)
+            cv2.putText(img, badge_lbl, (yx1 + 5, yy1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.36, (10, 20, 30), 1, cv2.LINE_AA)
+
+        # 4. Connecting Vector Line & Collision Dynamics
+        if rcx is not None and ycx is not None:
+            mid_x, mid_y = (rcx + ycx) // 2, (rcy + ycy) // 2
+
+            if is_colliding:
+                pulse_color = (40, 100, 255) if int(current_time * 6) % 2 == 0 else (0, 230, 255)
+                cv2.line(img, (rcx, rcy), (ycx, ycy), pulse_color, 4)
+                badge_w, badge_h = 240, 32
+                cv2.rectangle(img, (mid_x - badge_w // 2, mid_y - badge_h // 2), (mid_x + badge_w // 2, mid_y + badge_h // 2), (20, 25, 35), -1)
+                cv2.rectangle(img, (mid_x - badge_w // 2, mid_y - badge_h // 2), (mid_x + badge_w // 2, mid_y + badge_h // 2), pulse_color, 2)
+                cv2.putText(img, "ACTIVE COLLISION DETECTED", (mid_x - 110, mid_y + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (255, 255, 255), 2, cv2.LINE_AA)
+            else:
+                line_color = (60, 230, 100) if dist_px >= 20.0 else (240, 180, 40)
+                cv2.line(img, (rcx, rcy), (ycx, ycy), line_color, 2, cv2.LINE_AA)
+                dist_str = f"d: {int(dist_px)}px"
+                cv2.rectangle(img, (mid_x - 38, mid_y - 12), (mid_x + 38, mid_y + 12), (20, 25, 35), -1)
+                cv2.rectangle(img, (mid_x - 38, mid_y - 12), (mid_x + 38, mid_y + 12), line_color, 1)
+                cv2.putText(img, dist_str, (mid_x - 30, mid_y + 4), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (240, 245, 250), 1, cv2.LINE_AA)
+
+        # 5. Dynamic Progress Meters based on Active Step
+        if active_step:
+            if active_step.id == "S01":
+                pct = min(1.0, self.bcx1_s01_hold_duration / 0.8)
+                cv2.rectangle(img, (w // 2 - 140, 62), (w // 2 + 140, 88), (20, 25, 35), -1)
+                cv2.rectangle(img, (w // 2 - 140, 62), (w // 2 - 140 + int(280 * pct), 88), (255, 200, 0), -1)
+                cv2.rectangle(img, (w // 2 - 140, 62), (w // 2 + 140, 88), (255, 230, 80), 1)
+                cv2.putText(img, f"IDENTIFY CONTAINER: {int(pct * 100)}%", (w // 2 - 110, 81), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (255, 255, 255), 1, cv2.LINE_AA)
+
+            elif active_step.id == "S02":
+                pct = min(1.0, self.bcx1_s02_hold_duration / 0.8)
+                cv2.rectangle(img, (w // 2 - 140, 62), (w // 2 + 140, 88), (20, 25, 35), -1)
+                cv2.rectangle(img, (w // 2 - 140, 62), (w // 2 - 140 + int(280 * pct), 88), (40, 220, 120), -1)
+                cv2.rectangle(img, (w // 2 - 140, 62), (w // 2 + 140, 88), (80, 250, 160), 1)
+                cv2.putText(img, f"VERIFY COLORS: {int(pct * 100)}% (RED & YELLOW)", (w // 2 - 130, 81), cv2.FONT_HERSHEY_SIMPLEX, 0.40, (255, 255, 255), 1, cv2.LINE_AA)
+
+            elif active_step.id == "S03":
+                pct = min(1.0, self.bcx1_s03_hold_duration / 0.8)
+                cv2.rectangle(img, (w // 2 - 140, 62), (w // 2 + 140, 88), (20, 25, 35), -1)
+                cv2.rectangle(img, (w // 2 - 140, 62), (w // 2 - 140 + int(280 * pct), 88), (0, 0, 255), -1)
+                cv2.rectangle(img, (w // 2 - 140, 62), (w // 2 + 140, 88), (100, 100, 255), 1)
+                cv2.putText(img, f"PLACE RED BOX: {int(pct * 100)}%", (w // 2 - 105, 81), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (255, 255, 255), 1, cv2.LINE_AA)
+
+            elif active_step.id == "S04":
+                pct = min(1.0, self.bcx1_s04_hold_duration / 0.8)
+                cv2.rectangle(img, (w // 2 - 140, 62), (w // 2 + 140, 88), (20, 25, 35), -1)
+                cv2.rectangle(img, (w // 2 - 140, 62), (w // 2 - 140 + int(280 * pct), 88), (0, 220, 240), -1)
+                cv2.rectangle(img, (w // 2 - 140, 62), (w // 2 + 140, 88), (80, 240, 255), 1)
+                cv2.putText(img, f"PLACE YELLOW BOX: {int(pct * 100)}%", (w // 2 - 115, 81), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (10, 15, 25), 1, cv2.LINE_AA)
+
+            elif active_step.id == "S05":
+                pct = min(1.0, self.bcx1_collision_hold_duration / 0.8)
+                bar_w = int(280 * pct)
+                cv2.rectangle(img, (w // 2 - 140, 62), (w // 2 + 140, 88), (20, 25, 35), -1)
+                fill_color = (60, 230, 100) if is_colliding else (40, 140, 255)
+                cv2.rectangle(img, (w // 2 - 140, 62), (w // 2 - 140 + bar_w, 88), fill_color, -1)
+                cv2.rectangle(img, (w // 2 - 140, 62), (w // 2 + 140, 88), (80, 180, 250), 1)
+                col_lbl = f"COLLISION HOLD: {int(pct * 100)}% ({self.bcx1_collision_hold_duration:.1f}s / 0.8s)" if is_colliding else "BRING RED & YELLOW BOXES TOGETHER"
+                cv2.putText(img, col_lbl, (w // 2 - 130, 81), cv2.FONT_HERSHEY_SIMPLEX, 0.41, (255, 255, 255), 1, cv2.LINE_AA)
+
+            elif active_step.id == "S06":
+                pct = min(1.0, self.bcx1_s06_hold_duration / 0.7)
+                bar_w = int(280 * pct)
+                cv2.rectangle(img, (w // 2 - 140, 62), (w // 2 + 140, 88), (20, 25, 35), -1)
+                is_sep = (not is_colliding) and (dist_px >= 20.0)
+                fill_color = (60, 230, 100) if is_sep else (255, 140, 40)
+                cv2.rectangle(img, (w // 2 - 140, 62), (w // 2 - 140 + bar_w, 88), fill_color, -1)
+                cv2.rectangle(img, (w // 2 - 140, 62), (w // 2 + 140, 88), (80, 240, 180), 1)
+                sep_lbl = f"SEPARATE HOLD: {int(pct * 100)}% (d: {int(dist_px)}px / 20px)" if is_sep else f"SEPARATE BOXES (d: {int(dist_px)}px / target: 20px)"
+                cv2.putText(img, sep_lbl, (w // 2 - 135, 81), cv2.FONT_HERSHEY_SIMPLEX, 0.40, (255, 255, 255), 1, cv2.LINE_AA)
+
+        elif self.protocol_complete:
+            cv2.rectangle(img, (w // 2 - 150, 62), (w // 2 + 150, 88), (20, 35, 25), -1)
+            cv2.rectangle(img, (w // 2 - 150, 62), (w // 2 + 150, 88), (60, 220, 100), -1)
+            cv2.putText(img, "ALL 6 STEPS VERIFIED NOMINAL", (w // 2 - 130, 81), cv2.FONT_HERSHEY_SIMPLEX, 0.44, (255, 255, 255), 1, cv2.LINE_AA)
+
+        # 6. Bottom Prompt & Alert Bar
+        has_alert = bool(self.recent_alerts and (current_time - self.recent_alerts[-1].timestamp) < 4.0)
+        cv2.rectangle(overlay, (0, h - 60), (w, h), (15, 20, 28), -1)
+        cv2.addWeighted(overlay, 0.85, img, 0.15, 0, img)
+        cv2.line(img, (0, h - 60), (w, h - 60), (45, 91, 216), 1)
+
+        if has_alert:
+            alert = self.recent_alerts[-1]
+            cv2.putText(img, f"ALERT [{alert.kind.upper()}]: {alert.message}", (25, h - 25), cv2.FONT_HERSHEY_SIMPLEX, 0.50, (80, 80, 255), 2, cv2.LINE_AA)
+        elif active_step:
+            step_prompt = f"[{active_step.id}] {active_step.prompt}"
+            cv2.putText(img, step_prompt, (25, h - 25), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (240, 245, 250), 1, cv2.LINE_AA)
+        else:
+            cv2.putText(img, "All procedure steps verified successfully.", (25, h - 25), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (80, 220, 120), 1, cv2.LINE_AA)
+
+
 

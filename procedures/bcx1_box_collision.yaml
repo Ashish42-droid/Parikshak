@@ -1,0 +1,239 @@
+# =============================================================================
+# PARIKSHAK - Procedure Definition Language (PDL) v1.0
+# =============================================================================
+# BCX-1 : Two-Box Collision in Container (Red & Yellow Box Experiment)
+#
+# Experiment Protocol:
+#   1. S01: Identify Bigger Container Box resting on workspace
+#   2. S02: Detect & Verify Box Colors (Red & Yellow)
+#   3. S03: Place Red Box into Container
+#   4. S04: Place Yellow Box into Container (separated from Red Box)
+#   5. S05: Bring Red and Yellow Boxes into physical collision (held >= 0.8 s)
+#   6. S06: Separate boxes to complete collision dynamics test
+#
+# Deviations guarded:
+#   - Out-of-order execution (attempting collision before both boxes are placed)
+#   - Skipped placement (skipping Red Box and placing Yellow Box first)
+#   - Collision outside container boundary (out-of-bounds hazard)
+# =============================================================================
+
+pdl_version: "1.0"
+
+procedure:
+  id: BCX-1
+  ps_id: "26174"
+  title: "Two-Box Collision in Container (Red & Yellow Box)"
+  revision: 2
+  revised_utc: "2026-09-29T13:30:00Z"
+  author: "Space Physical Science / Collision Dynamics"
+  applies_to_rack: BENCH-1
+  criticality: nominal
+  language: en-IN
+  estimated_duration_s: 35
+
+requires:
+  min_model_version: "parikshak-perception-1.2.0"
+  capabilities:
+    - object_detection
+    - rack_frame_extrinsics
+    - crew_confirm
+  detector_classes:
+    - vial
+
+frame:
+  type: rack
+  fiducials:
+    family: tag36h11
+    ids: [101, 102]
+    layout_file: racks/msg_a_fiducials.json
+  min_tags_for_lock: 0
+  on_frame_loss:
+    action: hold_last_known
+    max_hold_s: 5.0
+    then: UNVERIFIED
+
+zones:
+  workspace:       { type: box, min: [-0.60, -0.50, -0.10], max: [0.60, 0.50, 0.40] }
+  container_zone:  { type: box, min: [-0.35, -0.25, -0.05], max: [0.35, 0.25, 0.25] }
+
+entities:
+  container_box:
+    detector_class: vial
+    label: "Container Box"
+    tts_name: "container box"
+
+  red_box:
+    detector_class: vial
+    label: "Red Box"
+    tts_name: "red box"
+
+  yellow_box:
+    detector_class: vial
+    label: "Yellow Box"
+    tts_name: "yellow box"
+
+crew_tokens: ["collision verified"]
+
+alert_policy:
+  complete_threshold: 0.85
+  deviation_threshold: 0.85
+  persistence_s: 1.0
+  unverified_after_s: 4.0
+  evidence_rate_hz: 2.0
+  hold_for_tolerance: 0.2
+  max_alerts_per_step: 2
+  cooldown_s: 5.0
+  severity_tiers:
+    info:     { channel: [gui] }
+    advisory: { channel: [gui, chime] }
+    caution:  { channel: [gui, chime, voice] }
+    critical: { channel: [gui, chime, voice], repeat_s: 8, require_ack: true }
+  crew_override:
+    enabled: true
+    tokens: ["override", "mark done", "continue anyway"]
+    logs_as: OPERATOR_OVERRIDE
+  advisory_only: true
+
+logging:
+  format: jsonl
+  hash_chain: sha256
+  mirror_text: true
+  clock: { wall: utc, monotonic: met }
+  embed_hashes: [procedure_file, detector_weights, tcn_weights, contact_weights]
+  evidence:
+    keyframe_on_transition: true
+    clip_on_deviation: { pre_s: 5, post_s: 5 }
+  downlink:
+    package: cfdp
+    priority: { log: high, deviation_clips: medium, full_video: low }
+
+# =============================================================================
+# FLOW
+# =============================================================================
+flow:
+  entry: S01
+  exit: [S06]
+
+  groups: []
+
+  steps:
+    # -------------------------------------------------------------------------
+    - id: S01
+      name: "Identify Bigger Container Box"
+      type: discrete
+      prompt_tts: "Position and verify the outer container box in workspace view."
+      objects: [container_box]
+      verification:
+        all:
+          - { visible: { entity: container_box, min_conf: 0.6 } }
+          - { in_zone: { entity: container_box, zone: workspace } }
+      effects:
+        - { assert: container_ready }
+      duration: { min_s: 1, nominal_s: 4, sigma_s: 2, max_s: 60 }
+      next: [S02]
+
+    # -------------------------------------------------------------------------
+    - id: S02
+      name: "Detect & Verify Box Colors"
+      type: discrete
+      prompt_tts: "Present the Red Box and Yellow Box to the camera to verify colors."
+      objects: [red_box, yellow_box]
+      preconditions:
+        all:
+          - { assert_true: container_ready }
+      verification:
+        all:
+          - { visible: { entity: red_box, min_conf: 0.6 } }
+          - { visible: { entity: yellow_box, min_conf: 0.6 } }
+      effects:
+        - { assert: colors_verified }
+      duration: { min_s: 1, nominal_s: 5, sigma_s: 2, max_s: 60 }
+      next: [S03]
+
+    # -------------------------------------------------------------------------
+    - id: S03
+      name: "Place Red Box into Container"
+      type: discrete
+      prompt_tts: "Place the Red Box inside the container box."
+      objects: [red_box]
+      preconditions:
+        all:
+          - { assert_true: colors_verified }
+      verification:
+        all:
+          - { visible: { entity: red_box, min_conf: 0.6 } }
+          - { in_zone: { entity: red_box, zone: container_zone } }
+      effects:
+        - { assert: red_in_container }
+      duration: { min_s: 1, nominal_s: 6, sigma_s: 3, max_s: 90 }
+      on_skip:
+        severity: critical
+        tts: "Warning: Step skipped. Place the Red Box inside the container first."
+        reason_template: "Yellow box or collision attempted before placing Red Box into container."
+      next: [S04]
+
+    # -------------------------------------------------------------------------
+    - id: S04
+      name: "Place Yellow Box into Container"
+      type: discrete
+      prompt_tts: "Place the Yellow Box inside the container, separated from the red box."
+      objects: [yellow_box]
+      preconditions:
+        all:
+          - { assert_true: red_in_container }
+      verification:
+        all:
+          - { visible: { entity: yellow_box, min_conf: 0.6 } }
+          - { in_zone: { entity: yellow_box, zone: container_zone } }
+      effects:
+        - { assert: both_in_container }
+      duration: { min_s: 1, nominal_s: 6, sigma_s: 3, max_s: 90 }
+      on_skip:
+        severity: caution
+        tts: "Caution: Place the Yellow Box inside the container before colliding."
+        reason_template: "Collision attempted before yellow box placement verification."
+      next: [S05]
+
+    # -------------------------------------------------------------------------
+    - id: S05
+      name: "Collide Red and Yellow Boxes"
+      type: discrete
+      prompt_tts: "Bring the Red and Yellow boxes together until collision occurs."
+      objects: [red_box, yellow_box]
+      preconditions:
+        all:
+          - { assert_true: both_in_container }
+      verification:
+        hold_for:
+          seconds: 0.8
+          expr:
+            all:
+              - { in_zone: { entity: red_box, zone: container_zone } }
+              - { in_zone: { entity: yellow_box, zone: container_zone } }
+      effects:
+        - { assert: collision_confirmed }
+      duration: { min_s: 2, nominal_s: 8, sigma_s: 3, max_s: 120 }
+      next: [S06]
+
+    # -------------------------------------------------------------------------
+    - id: S06
+      name: "Separate Boxes & Confirm"
+      type: discrete
+      terminal: true
+      prompt_tts: "Separate the boxes inside the container to conclude trial."
+      objects: [red_box, yellow_box]
+      preconditions:
+        all:
+          - { assert_true: collision_confirmed }
+      verification:
+        hold_for:
+          seconds: 0.8
+          expr:
+            any:
+              - { crew_confirmed: { token: "collision verified" } }
+              - all:
+                  - { in_zone: { entity: red_box, zone: container_zone } }
+                  - { in_zone: { entity: yellow_box, zone: container_zone } }
+      effects:
+        - { assert: protocol_complete }
+      duration: { min_s: 2, nominal_s: 6, sigma_s: 2, max_s: 90 }

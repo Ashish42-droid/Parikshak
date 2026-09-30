@@ -13,7 +13,6 @@ import time
 from pathlib import Path
 from typing import Any
 
-import cv2
 import numpy as np
 
 from parikshak.perception.yolo_tracker import YoloExperimentTracker
@@ -25,7 +24,7 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 class TrackerService:
     """Singleton-style coordinator for live and replay experiment tracking."""
 
-    def __init__(self, experiment_id: str = "WBP-1") -> None:
+    def __init__(self, experiment_id: str = "BCX-1") -> None:
         self.lock = threading.RLock()
         self.experiment_id = experiment_id
         self.tracker = YoloExperimentTracker(self.experiment_id)
@@ -381,17 +380,43 @@ class TrackerService:
                     cur = self.tracker.steps[self.tracker.step_idx]
                     cur.status = "completed"
                     cur.completed_at = now
-                    if cur.id == "S01":
-                        self.tracker.s01_stable_duration = self.tracker.S01_TARGET_S
-                    elif cur.id == "S02":
-                        self.tracker.target_lifted = True
-                        self.tracker.s02_lift_duration = self.tracker.S02_TARGET_S
-                    elif cur.id == "S03":
-                        self.tracker.water_consumed = True
-                        self.tracker.drink_hold_duration = self.tracker.S03_TARGET_S
-                    elif cur.id == "S04" or self.tracker.step_idx >= len(self.tracker.steps) - 1:
-                        self.tracker.protocol_complete = True
-                        self.tracker.s04_settle_duration = self.tracker.S04_TARGET_S
+                    if self.tracker.experiment_id in ["BCX-1", "BOX-COL-1"]:
+                        if cur.id == "S01":
+                            self.tracker.bcx1_s01_hold_duration = 0.8
+                            self.tracker.bcx1_container_locked = True
+                        elif cur.id == "S02":
+                            self.tracker.bcx1_s02_hold_duration = 0.8
+                            self.tracker.bcx1_colors_verified = True
+                        elif cur.id == "S03":
+                            self.tracker.bcx1_s03_hold_duration = 0.8
+                            self.tracker.bcx1_red_placed = True
+                            self.tracker.bcx1_red_inside = True
+                        elif cur.id == "S04":
+                            self.tracker.bcx1_s04_hold_duration = 0.8
+                            self.tracker.bcx1_yellow_placed = True
+                            self.tracker.bcx1_yellow_inside = True
+                            self.tracker.bcx1_distance_px = 60.0
+                        elif cur.id == "S05":
+                            self.tracker.bcx1_collision_hold_duration = 0.8
+                            self.tracker.bcx1_collision = True
+                            self.tracker.bcx1_distance_px = 0.0
+                        elif cur.id == "S06" or self.tracker.step_idx >= len(self.tracker.steps) - 1:
+                            self.tracker.bcx1_s06_hold_duration = 0.7
+                            self.tracker.bcx1_collision = False
+                            self.tracker.bcx1_distance_px = 40.0
+                            self.tracker.protocol_complete = True
+                    else:
+                        if cur.id == "S01":
+                            self.tracker.s01_stable_duration = self.tracker.S01_TARGET_S
+                        elif cur.id == "S02":
+                            self.tracker.target_lifted = True
+                            self.tracker.s02_lift_duration = self.tracker.S02_TARGET_S
+                        elif cur.id == "S03":
+                            self.tracker.water_consumed = True
+                            self.tracker.drink_hold_duration = self.tracker.S03_TARGET_S
+                        elif cur.id == "S04" or self.tracker.step_idx >= len(self.tracker.steps) - 1:
+                            self.tracker.protocol_complete = True
+                            self.tracker.s04_settle_duration = self.tracker.S04_TARGET_S
                     self.tracker._advance_step(now)
             elif event_name == "inject_skip":
                 # Mark step S03 as skipped
@@ -416,6 +441,60 @@ class TrackerService:
                     tts="Wrong object grasped. That is the cup, not the water bottle.",
                     t=now,
                 )
+            elif event_name == "bcx1_collision":
+                # Simulate BCX-1 collision event (Step S05)
+                self.tracker.bcx1_container_locked = True
+                self.tracker.bcx1_colors_verified = True
+                self.tracker.bcx1_red_placed = True
+                self.tracker.bcx1_yellow_placed = True
+                self.tracker.bcx1_red_inside = True
+                self.tracker.bcx1_yellow_inside = True
+                self.tracker.bcx1_collision = True
+                self.tracker.bcx1_distance_px = 0.0
+                self.tracker.bcx1_collision_hold_duration = 0.8
+                for s in self.tracker.steps:
+                    if s.id in ["S01", "S02", "S03", "S04", "S05"]:
+                        s.status = "completed"
+                        s.completed_at = now
+                self.tracker._advance_step(now)
+                self.tracker._trigger_alert(
+                    step_id="S05",
+                    severity="info",
+                    kind="collision_confirmed",
+                    message="Box Collision Confirmed! Red and Yellow boxes in active collision inside container.",
+                    tts="Notice: Box collision confirmed. Contact verified inside container.",
+                    t=now,
+                )
+            elif event_name == "bcx1_skip_red":
+                # Simulate BCX-1 skipped red box (placing yellow first in S03)
+                for s in self.tracker.steps:
+                    if s.id == "S03":
+                        s.status = "skipped"
+                        break
+                self.tracker.bcx1_red_inside = False
+                self.tracker.bcx1_yellow_inside = True
+                self.tracker._trigger_alert(
+                    step_id="S03",
+                    severity="critical",
+                    kind="out_of_order",
+                    message="Out of order! Step S03 requires placing Red Box first. Yellow box detected inside.",
+                    tts="Warning: Step out of order. Place the Red Box inside the container first.",
+                    t=now,
+                )
+            elif event_name == "bcx1_hazard_oob":
+                # Simulate collision out of bounds hazard
+                self.tracker.bcx1_collision = True
+                self.tracker.bcx1_distance_px = 0.0
+                self.tracker.bcx1_red_inside = False
+                self.tracker.bcx1_yellow_inside = False
+                self.tracker._trigger_alert(
+                    step_id="S05",
+                    severity="critical",
+                    kind="hazard",
+                    message="Out-of-Bounds Hazard! Collision must take place inside the container.",
+                    tts="Hazard warning: Collision must occur inside the container.",
+                    t=now,
+                )
             elif event_name == "reset":
                 self.tracker.reset()
 
@@ -432,5 +511,5 @@ _service: TrackerService | None = None
 def get_tracker_service() -> TrackerService:
     global _service
     if _service is None:
-        _service = TrackerService("WBP-1")
+        _service = TrackerService("BCX-1")
     return _service
