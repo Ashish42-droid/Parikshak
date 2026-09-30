@@ -281,8 +281,8 @@ td.num { text-align: right; }
 .mode-switches button[aria-selected="true"] { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
 
 .video-frame-container { position: relative; width: 100%; aspect-ratio: 4 / 3; background: #0A0F14; border-radius: 8px; overflow: hidden; display: flex; justify-content: center; align-items: center; border: 1px solid var(--grid); }
-.video-frame-container img { width: 100%; height: 100%; object-fit: contain; display: none; }
-.video-frame-container video { width: 100%; height: 100%; object-fit: contain; display: none; }
+.video-frame-container img { width: 100%; height: 100%; object-fit: contain; display: none; position: relative; z-index: 2; }
+.video-frame-container video { width: 100%; height: 100%; object-fit: contain; position: absolute; top: 0; left: 0; z-index: 1; opacity: 0.001; pointer-events: none; }
 .cam-spinner { width: 38px; height: 38px; border: 3px solid rgba(255,255,255,0.18); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .video-overlay-msg { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 10px; color: #8F9CA8; font-size: 14px; text-align: center; padding: 20px; }
@@ -410,7 +410,7 @@ td.num { text-align: right; }
 
           <div class="video-frame-container" id="video-container">
             <img id="tracker-output-img" alt="YOLO Real-Time Vision Output" src="" style="display:none;" />
-            <video id="webcam-raw-video" playsinline muted autoplay style="display:none;"></video>
+            <video id="webcam-raw-video" playsinline muted autoplay style="position:absolute; top:0; left:0; width:100%; height:100%; object-fit:contain; z-index:1; opacity:0.001; pointer-events:none;"></video>
             <canvas id="webcam-hidden-canvas" style="display:none;"></canvas>
             <div id="rec-live-hud" class="rec-live-hud" style="display:none;">
               <span class="rec-dot-pulse"></span>
@@ -2824,7 +2824,7 @@ td.num { text-align: right; }
           <p style="color:#A9B5C1; font-size:13px; margin:0;">Please click 'Allow' if your browser prompts for camera access</p>
         </div>
       `;
-      rawVideo.style.display = "none";
+      rawVideo.style.display = "block";
       imgOut.style.display = "none";
 
       try {
@@ -2842,12 +2842,20 @@ td.num { text-align: right; }
         }
 
         webcamStream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints });
+        rawVideo.style.display = "block";
         rawVideo.srcObject = webcamStream;
         await rawVideo.play();
         videoPlaceholder.style.display = "none";
-        rawVideo.style.display = "block";
+        imgOut.style.display = "block";
         runWebcamLoop();
-        speak("Live camera activated. Please place your water bottle in camera view.");
+        const expId = sel ? sel.value : "MOA-1";
+        if (expId === "MOA-1") {
+          speak("Live camera activated. Multi-Object experiment ready. Step 1: Position your chair in view.");
+        } else if (expId === "BCX-1") {
+          speak("Live camera activated. Step 1: Position container box in view.");
+        } else {
+          speak("Live camera activated. Step 1: Please place your water bottle on table in view.");
+        }
         if (chkAutoRec && chkAutoRec.checked && !isRecordingActive) {
           setTimeout(() => { if (!isRecordingActive) startExperimentRecording(); }, 600);
         }
@@ -2877,21 +2885,20 @@ td.num { text-align: right; }
     }
 
     async function captureWebcamFrame() {
-      if (!rawVideo || !rawVideo.videoWidth || isSendingFrame || !trackerPlaying) return;
+      if (!rawVideo || rawVideo.readyState < 2 || isSendingFrame || !trackerPlaying) return;
       isSendingFrame = true;
       hiddenCanvas.width = 640;
       hiddenCanvas.height = 480;
       const ctx = hiddenCanvas.getContext("2d");
-      ctx.drawImage(rawVideo, 0, 0, 640, 480);
-      const b64 = hiddenCanvas.toDataURL("image/jpeg", 0.70);
-
       try {
+        ctx.drawImage(rawVideo, 0, 0, 640, 480);
+        const b64 = hiddenCanvas.toDataURL("image/jpeg", 0.72);
+
         const res = await api.trackerFrame(b64);
         if (res && res.annotated_frame) {
           imgOut.src = res.annotated_frame;
           if (imgOut.style.display === "none") {
             imgOut.style.display = "block";
-            rawVideo.style.display = "none";
           }
           if (isRecordingActive) renderFrameToRecCanvas();
         }
@@ -3536,6 +3543,25 @@ td.num { text-align: right; }
       $("#m-contact").textContent = geo.red_inside ? "IN CONTAINER" : (geo.red_box_detected ? "DETECTED" : "SEARCHING");
       $("#m-lift").textContent = geo.yellow_inside ? "IN CONTAINER" : (geo.yellow_box_detected ? "DETECTED" : "SEARCHING");
       $("#m-mouth").textContent = geo.is_colliding ? "💥 COLLIDING" : (geo.distance_px !== null && geo.distance_px !== undefined ? `${Math.round(geo.distance_px)}px` : "CLEAR");
+    } else if (telem.experiment_id === "MOA-1") {
+      const l1 = $("#m-lbl-1"); if (l1) l1.textContent = "Chair Status";
+      const l2 = $("#m-lbl-2"); if (l2) l2.textContent = "Phone Status";
+      const l3 = $("#m-lbl-3"); if (l3) l3.textContent = "Water Bottle";
+      const l4 = $("#m-lbl-4"); if (l4) l4.textContent = "Activity & Posture";
+
+      const gl1 = $("#t-geom-l1"); if (gl1) gl1.textContent = "Chair";
+      const gl2 = $("#t-geom-l2"); if (gl2) gl2.textContent = "Phone";
+      const gl3 = $("#t-geom-l3"); if (gl3) gl3.textContent = "Bottle";
+      const gl4 = $("#t-geom-l4"); if (gl4) gl4.textContent = "Posture";
+
+      const chairSt = geo.is_seated ? "SEATED" : (geo.chair_pulled ? "PULLED" : (telem.chair?.detected ? "READY" : "SEARCHING"));
+      const phoneSt = geo.phone_stowed ? "STOWED" : (geo.phone_picked ? "LIFTED" : (telem.phone?.detected ? "READY" : "SEARCHING"));
+      const bottleSt = geo.bottle_returned ? "RETURNED" : (geo.water_consumed ? "DRUNK" : (geo.bottle_lifted ? "LIFTED" : (telem.bottle?.detected ? "READY" : "SEARCHING")));
+
+      $("#m-target").textContent = chairSt;
+      $("#m-contact").textContent = phoneSt;
+      $("#m-lift").textContent = bottleSt;
+      $("#m-mouth").textContent = geo.near_mouth ? "DRINK ZONE" : (geo.is_seated ? "SEATED NOMINAL" : (geo.posture_status ? geo.posture_status.replace(/_/g, " ") : "NOMINAL"));
     } else {
       const l1 = $("#m-lbl-1"); if (l1) l1.textContent = "Target Object";
       const l2 = $("#m-lbl-2"); if (l2) l2.textContent = "Hand Contact";
@@ -3547,7 +3573,7 @@ td.num { text-align: right; }
       const gl3 = $("#t-geom-l3"); if (gl3) gl3.textContent = "Mouth Dist";
       const gl4 = $("#t-geom-l4"); if (gl4) gl4.textContent = "Drink Action";
 
-      $("#m-target").textContent = geo.target_detected ? `YES (${Math.round((geo.target_confidence || 0.9)*100)}%)` : "SEARCHING";
+      $("#m-target").textContent = geo.target_detected ? `BOTTLE (${Math.round((geo.target_confidence || 0.9)*100)}%)` : "SEARCHING";
       $("#m-contact").textContent = geo.hand_contact ? "GRASPED" : "NONE";
       $("#m-lift").textContent = geo.is_lifted ? "LIFTED" : "ON TABLE";
       $("#m-mouth").textContent = geo.near_mouth ? "DRINK ZONE" : "AWAY";

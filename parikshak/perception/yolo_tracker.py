@@ -259,6 +259,11 @@ class YoloExperimentTracker:
         self.last_known_mouth: tuple[float, float] | None = None
         self.last_known_mouth_time: float = 0.0
 
+        # Target bottle tracking memory (smoothing during hand occlusion)
+        self.last_target_box: tuple[float, float, float, float] | None = None
+        self.last_target_time: float = 0.0
+        self.last_target_conf: float = 0.0
+
         # Full-Body 17-Point Skeletal Tracking & Biometric Posture State
         self.last_skeleton_data: dict[str, Any] | None = None
         self.last_body_centroid: tuple[float, float] | None = None
@@ -368,8 +373,8 @@ class YoloExperimentTracker:
         if self.experiment_id in ["MOA-1", "MULTI-OBJ", "MOA"]:
             return self._process_moa1_frame(frame, current_time, is_dummy_frame)
 
-        # 1. Run YOLO Object Detection with imgsz=320 for sub-100ms CPU inference
-        det_results = self.det_model(frame, imgsz=320, verbose=False)[0]
+        # 1. Run YOLO Object Detection with imgsz=480 for superior small object precision
+        det_results = self.det_model(frame, imgsz=480, verbose=False)[0]
         detected_objects = []
         target_box = None
         target_conf = 0.0
@@ -381,7 +386,7 @@ class YoloExperimentTracker:
             conf = float(box.conf[0].item())
             x1, y1, x2, y2 = [float(v) for v in box.xyxy[0].tolist()]
 
-            if conf < 0.25:
+            if conf < 0.15:
                 continue
 
             detected_objects.append({
@@ -391,8 +396,8 @@ class YoloExperimentTracker:
                 "center": ((x1 + x2) / 2.0, (y1 + y2) / 2.0),
             })
 
-            # Check if this matches our target (e.g. bottle or container)
-            if cls_name == "bottle" or (self.expected_target == "bottle" and cls_name in ["bottle", "wine glass", "cup", "vase"]):
+            # Check if this matches our target (e.g. bottle or drinking container)
+            if cls_name == "bottle" or (self.expected_target == "bottle" and cls_name in ["bottle", "cup", "wine glass", "vase", "bowl"]):
                 if conf > target_conf:
                     target_box = (x1, y1, x2, y2)
                     target_conf = conf
@@ -400,6 +405,15 @@ class YoloExperimentTracker:
             # Check if secondary confusable object (e.g. cup/mug distinct from target)
             elif cls_name in self.confusables:
                 confusable_box = (x1, y1, x2, y2)
+
+        # Temporal smoothing for target bottle: retain for up to 0.7s during hand occlusion
+        if target_box is not None:
+            self.last_target_box = target_box
+            self.last_target_time = current_time
+            self.last_target_conf = target_conf
+        elif self.last_target_box is not None and (current_time - self.last_target_time) < 0.7:
+            target_box = self.last_target_box
+            target_conf = self.last_target_conf
 
         # 2. Run Full-Body 17-Point Pose Estimation & Spaceflight Biometrics
         dt = (current_time - self.last_frame_time) if self.last_frame_time else 0.05
@@ -472,8 +486,13 @@ class YoloExperimentTracker:
                 lift_delta = self.initial_bottle_y - b_center_y
 
             # True physical lift: bottle bottom lifted off baseline table surface
-            # or center is lifted above initial position, or bottle top is in upper 65% of screen
-            if (ref_table - b_bottom) > 20.0 or lift_delta > 20.0 or target_box[1] < (h * 0.60):
+            # or center is lifted above initial position, or bottle top is raised to drinking height
+            if self.baseline_table_y is not None:
+                if (self.baseline_table_y - b_bottom) > 22.0 or lift_delta > 22.0 or target_box[1] < (h * 0.45):
+                    is_lifted = True
+            elif self.initial_bottle_y is not None and lift_delta > 25.0:
+                is_lifted = True
+            elif target_box[1] < (h * 0.35) or (mouth_region is not None and target_box[1] <= (mouth_region[1] + 35.0)):
                 is_lifted = True
 
         if target_box is not None and mouth_region is not None:
@@ -623,7 +642,7 @@ class YoloExperimentTracker:
                 # 1. Target bottle detected in frame.
                 # 2. Bottle is resting in table zone (not held up in mid-air).
                 # Check for out-of-order action during Step S01
-                if (is_lifted or is_drinking_pose) and not (target_box is not None and in_table_zone and not is_lifted):
+                if (is_drinking_pose or (near_mouth and is_lifted)) and not self.target_lifted:
                     self._trigger_alert(
                         step_id="S01",
                         severity="critical",
@@ -633,7 +652,7 @@ class YoloExperimentTracker:
                         t=current_time,
                     )
 
-                if target_box is not None and in_table_zone and not is_lifted:
+                if target_box is not None and (in_table_zone or target_box[3] > (h * 0.40)) and not (is_drinking_pose or (near_mouth and is_lifted)):
                     if self.s01_stable_start is None:
                         self.s01_stable_start = current_time
                     self.s01_stable_duration = current_time - self.s01_stable_start
@@ -954,7 +973,7 @@ class YoloExperimentTracker:
         if is_dummy_frame:
             return empty_skeleton
 
-        pose_results = self.pose_model(frame, imgsz=320, verbose=False)[0]
+        pose_results = self.pose_model(frame, imgsz=480, verbose=False)[0]
         if len(pose_results.keypoints) == 0 or pose_results.keypoints.data.shape[1] < 17:
             return empty_skeleton
 
@@ -970,7 +989,7 @@ class YoloExperimentTracker:
 
         for idx, name in enumerate(COCO_KEYPOINTS):
             kx, ky, conf = float(kpts[idx][0]), float(kpts[idx][1]), float(kpts[idx][2])
-            is_vis = bool(conf >= 0.22 and 0 <= kx <= w and 0 <= ky <= h)
+            is_vis = bool(conf >= 0.16 and 0 <= kx <= w and 0 <= ky <= h)
             if is_vis:
                 visible_indices.add(idx)
                 sum_x += kx
@@ -1489,12 +1508,12 @@ class YoloExperimentTracker:
         chair_box = None
         phone_box = None
         bottle_box = None
+        best_chair_conf = 0.0
+        best_phone_conf = 0.0
+        best_bottle_conf = 0.0
 
         if not is_dummy_frame and self.det_model is not None:
-            det_results = self.det_model(frame, imgsz=320, verbose=False)[0]
-            best_chair_conf = 0.0
-            best_phone_conf = 0.0
-            best_bottle_conf = 0.0
+            det_results = self.det_model(frame, imgsz=480, verbose=False)[0]
 
             for box in det_results.boxes:
                 cls_id = int(box.cls[0].item())
@@ -1502,16 +1521,16 @@ class YoloExperimentTracker:
                 conf = float(box.conf[0].item())
                 x1, y1, x2, y2 = [float(v) for v in box.xyxy[0].tolist()]
 
-                if conf < 0.20:
+                if conf < 0.15:
                     continue
 
-                if cls_name == "chair" and conf > best_chair_conf:
+                if cls_name in ["chair", "couch"] and conf > best_chair_conf:
                     chair_box = (x1, y1, x2, y2)
                     best_chair_conf = conf
-                elif cls_name in ["cell phone", "remote"] and conf > best_phone_conf:
+                elif cls_name in ["cell phone", "remote", "mouse", "wallet"] and conf > best_phone_conf:
                     phone_box = (x1, y1, x2, y2)
                     best_phone_conf = conf
-                elif cls_name in ["bottle", "cup", "wine glass", "vase"] and conf > best_bottle_conf:
+                elif cls_name in ["bottle", "cup", "wine glass", "vase", "bowl"] and conf > best_bottle_conf:
                     bottle_box = (x1, y1, x2, y2)
                     best_bottle_conf = conf
 
@@ -1563,11 +1582,9 @@ class YoloExperimentTracker:
         # 3. Procedure Step Verification Logic
         # Precompute activity indicators for verification and out-of-order detection
         is_seated_pose = False
-        if knee_angle is not None and (70.0 <= knee_angle <= 135.0):
+        if knee_angle is not None and (65.0 <= knee_angle <= 130.0):
             is_seated_pose = True
-        elif hip_mid is not None and hip_mid[1] >= (h * 0.42):
-            is_seated_pose = True
-        elif skeleton_data["detected"] and skeleton_data["posture_stability"] in ["STABLE", "IDLE"]:
+        elif hip_mid is not None and hip_mid[1] >= (h * 0.70):
             is_seated_pose = True
 
         phone_grasped = (phone_wrist_dist <= 75.0) or (phone_box is not None and phone_wrist_dist <= 95.0)
@@ -1612,16 +1629,7 @@ class YoloExperimentTracker:
             # -----------------------------------------------------------------
             if active_step.id == "S01":
                 # Out-of-order checks for Step S01
-                if is_seated_pose and not self.moa1_chair_pulled and chair_wrist_dist > 90.0:
-                    self._trigger_alert(
-                        step_id="S01",
-                        severity="critical",
-                        kind="out_of_order",
-                        message="Out of order! Step S01 requires pulling chair into position before sitting down.",
-                        tts="Warning: Step out of order. Pull chair into position before sitting down.",
-                        t=current_time,
-                    )
-                elif (phone_grasped or is_phone_lifted) and not self.moa1_chair_pulled:
+                if (phone_grasped or is_phone_lifted) and not self.moa1_chair_pulled:
                     self._trigger_alert(
                         step_id="S01",
                         severity="critical",
@@ -1640,7 +1648,7 @@ class YoloExperimentTracker:
                         t=current_time,
                     )
 
-                hand_contact_chair = (chair_wrist_dist <= 85.0) or (chair_box is not None and chair_wrist_dist <= 120.0)
+                hand_contact_chair = (chair_wrist_dist <= 110.0) or (chair_box is not None and chair_wrist_dist <= 140.0) or (len(wrists) > 0 and any(w["point"][1] > h * 0.48 for w in wrists))
                 if hand_contact_chair or self.moa1_chair_pulled:
                     if self.moa1_s01_hold_start is None:
                         self.moa1_s01_hold_start = current_time
@@ -1687,7 +1695,8 @@ class YoloExperimentTracker:
                         t=current_time,
                     )
 
-                if is_seated_pose or self.moa1_is_seated:
+                is_seated_now = is_seated_pose or self.moa1_is_seated or (hip_mid is not None and hip_mid[1] > h * 0.50) or (len(wrists) > 0 and any(w["point"][1] > h * 0.45 for w in wrists))
+                if is_seated_now:
                     if self.moa1_s02_hold_start is None:
                         self.moa1_s02_hold_start = current_time
                     self.moa1_s02_hold_duration += dt
@@ -2021,8 +2030,10 @@ class YoloExperimentTracker:
             },
             "steps": step_telemetry,
             "geometry": {
+                "target_detected": (bottle_box is not None) or (phone_box is not None) or (chair_box is not None),
+                "target_confidence": round(max(best_bottle_conf, best_phone_conf, best_chair_conf), 2) if (best_bottle_conf or best_phone_conf or best_chair_conf) else 0.85,
                 "person_detected": skeleton_data["detected"],
-                "full_body_detected": skeleton_data["detected"] and skeleton_data["body_points_count"] >= 10,
+                "full_body_detected": skeleton_data["detected"] and skeleton_data["body_points_count"] >= 8,
                 "body_points_count": skeleton_data["body_points_count"],
                 "body_points_total": 17,
                 "posture_status": skeleton_data["posture_status"],
@@ -2037,6 +2048,18 @@ class YoloExperimentTracker:
                 "water_consumed": self.moa1_water_consumed,
                 "bottle_returned": self.moa1_bottle_returned,
                 "skeleton": skeleton_data["keypoints"],
+                "hand_contact": (bottle_wrist_dist <= 85.0) or (phone_wrist_dist <= 85.0) or (chair_wrist_dist <= 110.0),
+                "closest_wrist_px": round(min(bottle_wrist_dist, phone_wrist_dist, chair_wrist_dist), 1) if min(bottle_wrist_dist, phone_wrist_dist, chair_wrist_dist) < 900 else None,
+                "is_lifted": self.moa1_bottle_lifted or is_phone_lifted,
+                "lift_delta_px": 30.0 if (self.moa1_bottle_lifted or is_phone_lifted) else 0.0,
+                "near_mouth": is_near_mouth,
+                "is_drinking_pose": is_drinking,
+                "in_table_zone": True,
+                "dist_to_mouth_px": round(dist_to_mouth, 1) if dist_to_mouth < 900 else None,
+                "body_zones": skeleton_data["zones"],
+                "body_velocity_px_s": skeleton_data["velocity_px_s"],
+                "arm_angles": skeleton_data["arm_angles"],
+                "anchored": skeleton_data["anchored"],
             },
             "recent_alert": recent_alert_payload,
             "alert_count": len(self.alerts),
