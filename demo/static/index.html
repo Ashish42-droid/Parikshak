@@ -2830,18 +2830,26 @@ td.num { text-align: right; }
       try {
         let videoConstraints = { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" };
         if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
-          const devices = await navigator.mediaDevices.enumerateDevices();
-          const videoDevs = devices.filter(d => d.kind === "videoinput");
-          const realCam = videoDevs.find(d => {
-            const lbl = (d.label || "").toLowerCase();
-            return (lbl.includes("hp") || lbl.includes("hd") || lbl.includes("integrated") || lbl.includes("usb")) && !lbl.includes("virtual") && !lbl.includes("eshare");
-          }) || (videoDevs.length > 1 ? videoDevs[1] : videoDevs[0]);
-          if (realCam && realCam.deviceId) {
-            videoConstraints = { deviceId: { exact: realCam.deviceId }, width: { ideal: 640 }, height: { ideal: 480 } };
-          }
+          try {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const videoDevs = devices.filter(d => d.kind === "videoinput");
+            const realCam = videoDevs.find(d => {
+              const lbl = (d.label || "").toLowerCase();
+              return (lbl.includes("hp") || lbl.includes("hd") || lbl.includes("integrated") || lbl.includes("usb")) && !lbl.includes("virtual") && !lbl.includes("eshare");
+            });
+            if (realCam && realCam.deviceId) {
+              videoConstraints = { deviceId: { ideal: realCam.deviceId }, width: { ideal: 640 }, height: { ideal: 480 } };
+            }
+          } catch (devErr) {}
         }
 
-        webcamStream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints });
+        try {
+          webcamStream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints });
+        } catch (firstErr) {
+          console.warn("Retrying getUserMedia with simple video constraint:", firstErr);
+          webcamStream = await navigator.mediaDevices.getUserMedia({ video: true });
+        }
+
         rawVideo.style.display = "block";
         rawVideo.srcObject = webcamStream;
         await rawVideo.play();
