@@ -1,0 +1,19 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "version": 2,
+  "cleanUrls": true,
+  "routes": [
+    {
+      "src": "/presentation",
+      "dest": "/demo/static/sih_presentation.html"
+    },
+    {
+      "src": "/",
+      "dest": "/demo/static/index.html"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/demo/static/$1"
+    }
+  ]
+}

@@ -54,7 +54,16 @@ def create_app():
     from fastapi.responses import FileResponse
     from pathlib import Path
 
+    from fastapi.middleware.cors import CORSMiddleware
+
     app = FastAPI(title="PARIKSHAK demo", docs_url=None, redoc_url=None)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     tracker_svc = get_tracker_service()
 
     static_p = Path("demo/static")
@@ -137,6 +146,15 @@ def create_app():
         return {
             "experiments": [
                 {
+                    "id": "WBP-1",
+                    "title": "Water Bottle Protocol (Activity Benchmark)",
+                    "category": "Interactive Benchmark & Prototype",
+                    "rack": "BENCH-1 (Desktop / Tabletop)",
+                    "steps_count": 4,
+                    "target_object": "Water Bottle",
+                    "description": "Validates 4 steps: bottle identified -> hand grasps and lifts -> drinks water at mouth (held >= 1.5s) -> bottle returned to table surface and released.",
+                },
+                {
                     "id": "MOA-1",
                     "title": "Multi Object Experiment (Chair, Phone & Bottle)",
                     "category": "Multi-Object HAR & Ergonomic Posture",
@@ -153,15 +171,6 @@ def create_app():
                     "steps_count": 6,
                     "target_object": "Red & Yellow Boxes",
                     "description": "Validates real-time color tracking & collision dynamics: S01 Identify container -> S02 Verify box colors (Red & Yellow) -> S03 Place Red box -> S04 Place Yellow box -> S05 Collide boxes -> S06 Separate boxes. Guards against skipped placement, uncalibrated colors, and out-of-bounds collision.",
-                },
-                {
-                    "id": "WBP-1",
-                    "title": "Water Bottle Protocol (Activity Benchmark)",
-                    "category": "Interactive Benchmark & Prototype",
-                    "rack": "BENCH-1 (Desktop / Tabletop)",
-                    "steps_count": 4,
-                    "target_object": "Water Bottle",
-                    "description": "Validates 4 steps: bottle identified -> hand grasps and lifts -> drinks water at mouth (held >= 1.5s) -> bottle returned to table surface and released.",
                 },
                 {
                     "id": "CRX-2",

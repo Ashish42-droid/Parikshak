@@ -25,7 +25,7 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 class TrackerService:
     """Singleton-style coordinator for live and replay experiment tracking."""
 
-    def __init__(self, experiment_id: str = "MOA-1") -> None:
+    def __init__(self, experiment_id: str = "WBP-1") -> None:
         self.lock = threading.RLock()
         self.experiment_id = experiment_id
         self.tracker = YoloExperimentTracker(self.experiment_id)
@@ -225,7 +225,7 @@ class TrackerService:
     def get_camera_frame_mjpeg(self) -> bytes | None:
         with self.lock:
             if self.video_cap is None or not self.video_cap.isOpened():
-                res = self.start_local_camera(0)
+                res = self.start_local_camera(-1)
                 if "error" in res or self.video_cap is None:
                     return None
             ret = False
@@ -711,5 +711,5 @@ _service: TrackerService | None = None
 def get_tracker_service() -> TrackerService:
     global _service
     if _service is None:
-        _service = TrackerService("MOA-1")
+        _service = TrackerService("WBP-1")
     return _service

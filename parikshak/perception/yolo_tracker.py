@@ -97,10 +97,10 @@ class YoloExperimentTracker:
     """End-to-end vision tracker and procedure validator using YOLO and OpenCV."""
 
     # Calibration and verification hold targets (in seconds)
-    S01_TARGET_S = 0.8  # Stable on table
-    S02_TARGET_S = 0.6  # Grasp and lift
-    S03_TARGET_S = 0.8  # Drinking hold (responsive natural sip duration)
-    S04_TARGET_S = 0.6  # Return to table & release
+    S01_TARGET_S = 0.7  # Stable on table
+    S02_TARGET_S = 0.5  # Grasp and lift
+    S03_TARGET_S = 0.7  # Drinking hold (responsive natural sip duration)
+    S04_TARGET_S = 0.5  # Return to table & release
 
     def __init__(self, experiment_id: str = "WBP-1") -> None:
         self.load_models()
@@ -398,9 +398,10 @@ class YoloExperimentTracker:
 
             # Check if this matches our target (e.g. bottle or drinking container)
             if cls_name == "bottle" or (self.expected_target == "bottle" and cls_name in ["bottle", "cup", "wine glass", "vase", "bowl"]):
-                if conf > target_conf:
+                rank_score = conf + (1.0 if cls_name == "bottle" else 0.0)
+                if rank_score > target_conf:
                     target_box = (x1, y1, x2, y2)
-                    target_conf = conf
+                    target_conf = rank_score
 
             # Check if secondary confusable object (e.g. cup/mug distinct from target)
             elif cls_name in self.confusables:
