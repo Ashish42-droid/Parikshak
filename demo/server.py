@@ -408,3 +408,4 @@ def main(argv: list[str] | None = None) -> int:
         threading.Timer(1.2, webbrowser.open, args=(url,)).start()
     uvicorn.run(create_app(), host="127.0.0.1", port=args.port, log_level="warning")
     return 0
+    app = FastAPI()
