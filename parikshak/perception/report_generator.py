@@ -74,6 +74,37 @@ def _get_step_observation(exp_id: str, step_id: str, status: str, hold_duration:
             if status == "completed":
                 return f"Boxes separated to distance {dist:.1f}px (nominal separation threshold: >= 20.0px)."
             return "Tracking separation and disengagement of experiment boxes."
+    elif exp_id in ["MOA-1", "MULTI-OBJ", "MOA"]:
+        if step_id == "S01":
+            if status == "completed":
+                return "Chair grasped and pulled into workstation position; seat displacement locked."
+            return "Tracking astronaut hand approach and chair positioning."
+        elif step_id == "S02":
+            k_angle = geometry.get("knee_angle_deg")
+            k_str = f" (knee angle: {k_angle:.1f}°)" if k_angle is not None else ""
+            if status == "completed":
+                return f"Astronaut seated posture verified{k_str}; bilateral alignment within ergonomic tolerance (85°-120°)."
+            return "Monitoring ergonomic seating posture and lower limb flexion."
+        elif step_id == "S03":
+            if status == "completed":
+                return "Smartphone grasped and lifted from desk surface; vertical elevation confirmed."
+            return "Tracking hand grasp kinematics on smartphone."
+        elif step_id == "S04":
+            if status == "completed":
+                return "Smartphone returned to desk surface; hand contact released."
+            return "Verifying phone replacement onto table surface."
+        elif step_id == "S05":
+            if status == "completed":
+                return "Water bottle grasped and lifted from desk surface."
+            return "Tracking hand grasp and bottle elevation off table."
+        elif step_id == "S06":
+            if status == "completed":
+                return f"Water bottle brought to oral region; continuous drinking dwell ({hold_duration:.2f}s >= 1.5s) verified."
+            return "Monitoring sustained drinking action at oral keypoints."
+        elif step_id == "S07":
+            if status == "completed":
+                return "Water bottle returned to table surface; astronaut hands retracted and released."
+            return "Verifying return of bottle to stable resting state on table."
     else:
         # Default WBP-1 or space mission procedures
         if step_id == "S01":

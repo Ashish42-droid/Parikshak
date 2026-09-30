@@ -137,6 +137,15 @@ def create_app():
         return {
             "experiments": [
                 {
+                    "id": "MOA-1",
+                    "title": "Multi Object Experiment (Chair, Phone & Bottle)",
+                    "category": "Multi-Object HAR & Ergonomic Posture",
+                    "rack": "BENCH-1 (Desktop Workspace / Ergonomics Lab)",
+                    "steps_count": 7,
+                    "target_object": "Chair, Smartphone & Water Bottle",
+                    "description": "Validates 7 activities with live camera verification: S01 Pull Chair -> S02 Sit Down on Chair (knee angle 85°-120°) -> S03 Pick Up Smartphone -> S04 Return Smartphone to Desk -> S05 Grasp and Lift Bottle -> S06 Drink Water (held >= 1.5s) -> S07 Return Bottle & Release Hands.",
+                },
+                {
                     "id": "BCX-1",
                     "title": "BCX-1: Two-Box Collision in Container (Red & Yellow)",
                     "category": "Physical Dynamics & Color HAR",

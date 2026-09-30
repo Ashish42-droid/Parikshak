@@ -1,0 +1,258 @@
+# =============================================================================
+# PARIKSHAK - Procedure Definition Language (PDL) v1.0
+# =============================================================================
+# MOA-1 : Multi-Object Experiment (Chair, Phone & Bottle)
+#
+# Ground-truth multi-activity protocol for validating human procedure compliance
+# across multiple objects and full-body posture tracking:
+#   1. S01: Pull Chair into Position (hand contact on chair backrest + displacement)
+#   2. S02: Sit Down on Chair (ergonomic seated posture, knee angle 85°-120°)
+#   3. S03: Pick Up Smartphone (grasp phone and lift off desk)
+#   4. S04: Return / Stow Smartphone on Table (place phone back on desk)
+#   5. S05: Grasp and Lift Water Bottle (grasp bottle and lift off table)
+#   6. S06: Drink Water from Bottle (bottle brought to mouth, held >= 1.5s)
+#   7. S07: Return Bottle to Table & Release Hands (bottle placed down & hands free)
+#
+# Deviations guarded:
+#   - Out-of-order execution (attempting to sit without pulling chair, drinking before lifting)
+#   - Skipped drinking (lifting bottle and placing back without drinking)
+#   - Premature phone stowage (dropping phone before verified pickup)
+# =============================================================================
+
+pdl_version: "1.0"
+
+procedure:
+  id: MOA-1
+  ps_id: "26174"
+  title: "Multi-Object Experiment (Chair, Phone & Bottle)"
+  revision: 1
+  revised_utc: "2026-09-30T03:00:00Z"
+  author: "Human Factors & Activity Ops / Parikshak"
+  applies_to_rack: BENCH-1
+  criticality: nominal
+  language: en-IN
+  estimated_duration_s: 60
+
+requires:
+  min_model_version: "parikshak-perception-1.2.0"
+  capabilities:
+    - object_detection
+    - hand_landmarks
+    - hand_object_contact
+    - rack_frame_extrinsics
+    - crew_confirm
+  detector_classes:
+    - vial
+    - foot_restraint
+
+frame:
+  type: rack
+  fiducials:
+    family: tag36h11
+    ids: [101, 102]
+    layout_file: racks/msg_a_fiducials.json
+  min_tags_for_lock: 0
+  on_frame_loss:
+    action: hold_last_known
+    max_hold_s: 5.0
+    then: UNVERIFIED
+
+zones:
+  workspace:          { type: box, min: [-0.80, -0.80, -0.20], max: [0.80, 0.80, 0.90] }
+  desk_surface:       { type: box, min: [-0.50, -0.40, -0.10], max: [0.50, 0.40, 0.20] }
+  chair_zone:         { type: box, min: [-0.40, -0.70, -0.40], max: [0.40, 0.10, 0.50] }
+  drinking_zone:      { type: box, min: [-0.25, -0.20, 0.30], max: [0.25, 0.25, 0.75] }
+
+entities:
+  chair:
+    detector_class: foot_restraint
+    label: "Ergonomic Chair"
+    tts_name: "chair"
+
+  phone:
+    detector_class: vial
+    label: "Smartphone"
+    tts_name: "smartphone"
+    confusable_with: [bottle]
+
+  bottle:
+    detector_class: vial
+    label: "Water Bottle"
+    tts_name: "water bottle"
+    confusable_with: [phone]
+
+crew_tokens: ["exercise complete"]
+
+alert_policy:
+  complete_threshold: 0.85
+  deviation_threshold: 0.85
+  persistence_s: 1.2
+  unverified_after_s: 4.0
+  evidence_rate_hz: 2.0
+  hold_for_tolerance: 0.2
+  max_alerts_per_step: 2
+  cooldown_s: 6.0
+  severity_tiers:
+    info:     { channel: [gui] }
+    advisory: { channel: [gui, chime] }
+    caution:  { channel: [gui, chime, voice] }
+    critical: { channel: [gui, chime, voice], repeat_s: 10, require_ack: true }
+  crew_override:
+    enabled: true
+    tokens: ["override", "mark done", "continue anyway"]
+    logs_as: OPERATOR_OVERRIDE
+  advisory_only: true
+
+logging:
+  format: jsonl
+  hash_chain: sha256
+  mirror_text: true
+  clock: { wall: utc, monotonic: met }
+  embed_hashes: [procedure_file, detector_weights, tcn_weights, contact_weights]
+  evidence:
+    keyframe_on_transition: true
+    clip_on_deviation: { pre_s: 5, post_s: 5 }
+  downlink:
+    package: cfdp
+    priority: { log: high, deviation_clips: medium, full_video: low }
+
+# =============================================================================
+# FLOW
+# =============================================================================
+flow:
+  entry: S01
+  exit: [S07]
+
+  groups: []
+
+  steps:
+    # -------------------------------------------------------------------------
+    - id: S01
+      name: "Pull Chair into Position"
+      type: discrete
+      prompt_tts: "Grasp the chair and pull it into position at your desk."
+      objects: [chair]
+      verification:
+        all:
+          - { visible: { entity: chair, min_conf: 0.5 } }
+          - { in_zone: { entity: chair, zone: chair_zone } }
+      effects:
+        - { assert: chair_positioned }
+      duration: { min_s: 1, nominal_s: 8, sigma_s: 3, max_s: 60 }
+      next: [S02]
+
+    # -------------------------------------------------------------------------
+    - id: S02
+      name: "Sit Down on Chair"
+      type: discrete
+      prompt_tts: "Sit down on the chair in an ergonomic posture."
+      objects: [chair]
+      preconditions:
+        all:
+          - { assert_true: chair_positioned }
+      verification:
+        all:
+          - { in_zone: { entity: chair, zone: chair_zone } }
+      effects:
+        - { assert: astronaut_seated }
+      duration: { min_s: 1, nominal_s: 8, sigma_s: 3, max_s: 60 }
+      next: [S03]
+
+    # -------------------------------------------------------------------------
+    - id: S03
+      name: "Pick Up Smartphone"
+      type: discrete
+      prompt_tts: "Pick up the smartphone from the desk."
+      objects: [phone]
+      preconditions:
+        all:
+          - { assert_true: astronaut_seated }
+      verification:
+        all:
+          - { grasped: { entity: phone } }
+          - { not: { in_zone: { entity: phone, zone: desk_surface } } }
+      effects:
+        - { assert: phone_in_hand }
+      duration: { min_s: 1, nominal_s: 8, sigma_s: 3, max_s: 60 }
+      next: [S04]
+
+    # -------------------------------------------------------------------------
+    - id: S04
+      name: "Return Smartphone to Desk"
+      type: discrete
+      prompt_tts: "Place the smartphone back onto the desk surface."
+      objects: [phone]
+      preconditions:
+        all:
+          - { assert_true: phone_in_hand }
+      verification:
+        all:
+          - { in_zone: { entity: phone, zone: desk_surface } }
+          - { released: { entity: phone } }
+      effects:
+        - { assert: phone_stowed }
+      duration: { min_s: 1, nominal_s: 8, sigma_s: 3, max_s: 60 }
+      next: [S05]
+
+    # -------------------------------------------------------------------------
+    - id: S05
+      name: "Grasp and Lift Water Bottle"
+      type: discrete
+      prompt_tts: "Grasp the water bottle and lift it off the desk."
+      objects: [bottle]
+      preconditions:
+        all:
+          - { assert_true: phone_stowed }
+      verification:
+        all:
+          - { grasped: { entity: bottle } }
+          - { not: { in_zone: { entity: bottle, zone: desk_surface } } }
+      effects:
+        - { assert: bottle_in_hand }
+      duration: { min_s: 1, nominal_s: 8, sigma_s: 3, max_s: 60 }
+      next: [S06]
+
+    # -------------------------------------------------------------------------
+    - id: S06
+      name: "Drink Water from Bottle"
+      type: discrete
+      prompt_tts: "Bring the water bottle to your mouth and drink water."
+      objects: [bottle]
+      preconditions:
+        all:
+          - { assert_true: bottle_in_hand }
+      verification:
+        hold_for:
+          seconds: 1.5
+          expr:
+            all:
+              - { grasped: { entity: bottle } }
+              - { in_zone: { entity: bottle, zone: drinking_zone } }
+      effects:
+        - { assert: water_consumed }
+      duration: { min_s: 2, nominal_s: 12, sigma_s: 4, max_s: 90 }
+      on_skip:
+        severity: caution
+        tts: "Step six, drink water, was skipped. Please take a drink before returning bottle."
+        reason_template: "Bottle was replaced without registering drinking action"
+      next: [S07]
+
+    # -------------------------------------------------------------------------
+    - id: S07
+      name: "Return Bottle to Table & Release Hands"
+      type: discrete
+      terminal: true
+      prompt_tts: "Return the bottle to the table surface and release your hands."
+      objects: [bottle]
+      preconditions:
+        all:
+          - { assert_true: water_consumed }
+      verification:
+        any:
+          - { crew_confirmed: { token: "exercise complete" } }
+          - all:
+              - { in_zone: { entity: bottle, zone: desk_surface } }
+              - { released: { entity: bottle } }
+      effects:
+        - { assert: protocol_complete }
+      duration: { min_s: 1, nominal_s: 10, sigma_s: 3, max_s: 60 }

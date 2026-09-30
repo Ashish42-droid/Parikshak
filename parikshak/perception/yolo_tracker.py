@@ -175,6 +175,27 @@ class YoloExperimentTracker:
             ]
             self.expected_target = "red_box"
             self.confusables = []
+        elif self.experiment_id in ["MOA-1", "MULTI-OBJ", "MOA"]:
+            self.title = "MOA-1 : Multi-Object Experiment (Chair, Phone & Bottle)"
+            self.rack_id = "BENCH-1 (Desktop / Ergonomics Lab)"
+            self.steps = [
+                StepState("S01", "Pull Chair into Position",
+                          "Grasp the chair and pull it into position at your desk."),
+                StepState("S02", "Sit Down on Chair",
+                          "Sit down on the chair in an ergonomic posture."),
+                StepState("S03", "Pick Up Smartphone",
+                          "Pick up the smartphone from the desk."),
+                StepState("S04", "Return Smartphone to Desk",
+                          "Place the smartphone back onto the desk surface."),
+                StepState("S05", "Grasp and Lift Water Bottle",
+                          "Grasp the water bottle and lift it off the desk."),
+                StepState("S06", "Drink Water from Bottle",
+                          "Bring the water bottle to your mouth and drink water."),
+                StepState("S07", "Return Bottle to Table & Release Hands",
+                          "Return the bottle to the table surface and release your hands."),
+            ]
+            self.expected_target = "multi_object"
+            self.confusables = []
         else:
             # Generic / custom space procedure
             self.title = f"Procedure {self.experiment_id}"
@@ -283,6 +304,46 @@ class YoloExperimentTracker:
         self.bcx1_last_separation_time: float = 0.0
         self.bcx1_abandon_start: float | None = None
 
+        # MOA-1 Multi-Object Activity tracking state
+        self.moa1_chair_box: tuple[float, float, float, float] | None = None
+        self.moa1_last_chair_box: tuple[float, float, float, float] | None = None
+        self.moa1_initial_chair_y: float | None = None
+        self.moa1_chair_pulled: bool = False
+        self.moa1_s01_hold_start: float | None = None
+        self.moa1_s01_hold_duration: float = 0.0
+
+        self.moa1_is_seated: bool = False
+        self.moa1_knee_angle_deg: float | None = None
+        self.moa1_s02_hold_start: float | None = None
+        self.moa1_s02_hold_duration: float = 0.0
+
+        self.moa1_phone_box: tuple[float, float, float, float] | None = None
+        self.moa1_last_phone_box: tuple[float, float, float, float] | None = None
+        self.moa1_initial_phone_y: float | None = None
+        self.moa1_phone_picked: bool = False
+        self.moa1_s03_hold_start: float | None = None
+        self.moa1_s03_hold_duration: float = 0.0
+
+        self.moa1_phone_stowed: bool = False
+        self.moa1_s04_hold_start: float | None = None
+        self.moa1_s04_hold_duration: float = 0.0
+
+        self.moa1_bottle_box: tuple[float, float, float, float] | None = None
+        self.moa1_last_bottle_box: tuple[float, float, float, float] | None = None
+        self.moa1_initial_bottle_y: float | None = None
+        self.moa1_bottle_lifted: bool = False
+        self.moa1_s05_hold_start: float | None = None
+        self.moa1_s05_hold_duration: float = 0.0
+
+        self.moa1_drinking_hold_start: float | None = None
+        self.moa1_drinking_hold_duration: float = 0.0
+        self.moa1_last_drinking_seen_time: float = 0.0
+        self.moa1_water_consumed: bool = False
+
+        self.moa1_bottle_returned: bool = False
+        self.moa1_s07_hold_start: float | None = None
+        self.moa1_s07_hold_duration: float = 0.0
+
     def process_frame(self, frame: np.ndarray, current_time: float | None = None) -> tuple[np.ndarray, dict[str, Any]]:
         """Processes one video frame: runs YOLO detection + pose, checks procedure step logic,
         draws Mission Control HUD, and returns telemetry.
@@ -302,6 +363,10 @@ class YoloExperimentTracker:
         # Route to dedicated BCX-1 Two-Box Collision pipeline
         if self.experiment_id in ["BCX-1", "BOX-COL-1"]:
             return self._process_bcx1_frame(frame, current_time, is_dummy_frame)
+
+        # Route to dedicated MOA-1 Multi-Object Activity pipeline
+        if self.experiment_id in ["MOA-1", "MULTI-OBJ", "MOA"]:
+            return self._process_moa1_frame(frame, current_time, is_dummy_frame)
 
         # 1. Run YOLO Object Detection with imgsz=320 for sub-100ms CPU inference
         det_results = self.det_model(frame, imgsz=320, verbose=False)[0]
@@ -1383,6 +1448,661 @@ class YoloExperimentTracker:
         if has_alert:
             alert = self.recent_alerts[-1]
             cv2.putText(img, f"WARNING: {alert.message}", (25, h - 25), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (80, 80, 255), 2, cv2.LINE_AA)
+        elif active_step:
+            step_prompt = f"[{active_step.id}] {active_step.prompt}"
+            cv2.putText(img, step_prompt, (25, h - 25), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (240, 245, 250), 1, cv2.LINE_AA)
+        else:
+            cv2.putText(img, "All procedure steps verified successfully.", (25, h - 25), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (80, 220, 120), 1, cv2.LINE_AA)
+
+    def _process_moa1_frame(
+        self, frame: np.ndarray, current_time: float, is_dummy_frame: bool
+    ) -> tuple[np.ndarray, dict[str, Any]]:
+        """Processes one video frame for MOA-1: Multi-Object Experiment (Chair, Phone & Bottle)."""
+        h, w = frame.shape[:2]
+        dt = (current_time - self.last_frame_time) if self.last_frame_time else 0.05
+        dt = min(max(dt, 0.01), 0.35)
+        self.last_frame_time = current_time
+
+        # 1. Full-Body 17-Point Skeleton & Posture
+        skeleton_data = self._extract_full_body_skeleton(frame, current_time, dt, is_dummy_frame)
+        wrists = skeleton_data["wrists"]
+        mouth_region = skeleton_data["mouth_region"]
+        leg_angles = skeleton_data.get("leg_angles", {})
+        l_knee = leg_angles.get("left_knee_deg")
+        r_knee = leg_angles.get("right_knee_deg")
+        knee_angle = l_knee if l_knee is not None else r_knee
+        if knee_angle is not None:
+            self.moa1_knee_angle_deg = knee_angle
+        hip_mid = skeleton_data.get("hip_mid")
+
+        # 2. Run Object Detection for chair, cell phone, and bottle
+        chair_box = None
+        phone_box = None
+        bottle_box = None
+
+        if not is_dummy_frame and self.det_model is not None:
+            det_results = self.det_model(frame, imgsz=320, verbose=False)[0]
+            best_chair_conf = 0.0
+            best_phone_conf = 0.0
+            best_bottle_conf = 0.0
+
+            for box in det_results.boxes:
+                cls_id = int(box.cls[0].item())
+                cls_name = self.det_model.names[cls_id]
+                conf = float(box.conf[0].item())
+                x1, y1, x2, y2 = [float(v) for v in box.xyxy[0].tolist()]
+
+                if conf < 0.20:
+                    continue
+
+                if cls_name == "chair" and conf > best_chair_conf:
+                    chair_box = (x1, y1, x2, y2)
+                    best_chair_conf = conf
+                elif cls_name in ["cell phone", "remote"] and conf > best_phone_conf:
+                    phone_box = (x1, y1, x2, y2)
+                    best_phone_conf = conf
+                elif cls_name in ["bottle", "cup", "wine glass", "vase"] and conf > best_bottle_conf:
+                    bottle_box = (x1, y1, x2, y2)
+                    best_bottle_conf = conf
+
+        # Fallbacks & smoothing for chair, phone, bottle
+        if chair_box is not None:
+            self.moa1_chair_box = chair_box
+            self.moa1_last_chair_box = chair_box
+            if self.moa1_initial_chair_y is None:
+                self.moa1_initial_chair_y = (chair_box[1] + chair_box[3]) / 2.0
+        elif self.moa1_last_chair_box is not None:
+            chair_box = self.moa1_last_chair_box
+        elif skeleton_data["detected"]:
+            chair_box = (float(w * 0.2), float(h * 0.45), float(w * 0.8), float(h * 0.95))
+            self.moa1_chair_box = chair_box
+
+        if phone_box is not None:
+            self.moa1_phone_box = phone_box
+            self.moa1_last_phone_box = phone_box
+            if self.moa1_initial_phone_y is None:
+                self.moa1_initial_phone_y = (phone_box[1] + phone_box[3]) / 2.0
+        elif self.moa1_last_phone_box is not None:
+            phone_box = self.moa1_last_phone_box
+
+        if bottle_box is not None:
+            self.moa1_bottle_box = bottle_box
+            self.moa1_last_bottle_box = bottle_box
+            if self.moa1_initial_bottle_y is None:
+                self.moa1_initial_bottle_y = (bottle_box[1] + bottle_box[3]) / 2.0
+        elif self.moa1_last_bottle_box is not None:
+            bottle_box = self.moa1_last_bottle_box
+
+        def _min_dist_to_box(b: tuple[float, float, float, float] | None) -> float:
+            if b is None or not wrists:
+                return 999.0
+            bx1, by1, bx2, by2 = b
+            bcx, bcy = (bx1 + bx2) / 2.0, (by1 + by2) / 2.0
+            min_d = 999.0
+            for w_item in wrists:
+                wx, wy = w_item["point"]
+                d = math.hypot(wx - bcx, wy - bcy)
+                if d < min_d:
+                    min_d = d
+            return min_d
+
+        chair_wrist_dist = _min_dist_to_box(chair_box)
+        phone_wrist_dist = _min_dist_to_box(phone_box)
+        bottle_wrist_dist = _min_dist_to_box(bottle_box)
+
+        # 3. Procedure Step Verification Logic
+        active_step = self.steps[self.step_idx] if self.step_idx < len(self.steps) else None
+
+        if active_step:
+            active_step.elapsed_s += dt
+
+            # -----------------------------------------------------------------
+            # S01: Pull Chair into Position
+            # -----------------------------------------------------------------
+            if active_step.id == "S01":
+                hand_contact_chair = (chair_wrist_dist <= 85.0) or (chair_box is not None and chair_wrist_dist <= 120.0)
+                if hand_contact_chair or self.moa1_chair_pulled:
+                    if self.moa1_s01_hold_start is None:
+                        self.moa1_s01_hold_start = current_time
+                    self.moa1_s01_hold_duration += dt
+                    if self.moa1_s01_hold_duration >= 0.8:
+                        self.moa1_chair_pulled = True
+                        active_step.status = "completed"
+                        active_step.completed_at = current_time
+                        self._advance_step(current_time)
+                        active_step = self.steps[self.step_idx] if self.step_idx < len(self.steps) else None
+                        self._trigger_alert(
+                            step_id="S01",
+                            severity="info",
+                            kind="step_complete",
+                            message="Chair pulled into position. Now sit down on the chair.",
+                            tts="Chair positioned. Please sit down on the chair.",
+                            t=current_time,
+                        )
+                else:
+                    self.moa1_s01_hold_start = None
+                    self.moa1_s01_hold_duration = max(0.0, self.moa1_s01_hold_duration - dt * 0.3)
+
+            # -----------------------------------------------------------------
+            # S02: Sit Down on Chair
+            # -----------------------------------------------------------------
+            elif active_step.id == "S02":
+                is_seated_pose = False
+                if knee_angle is not None and (70.0 <= knee_angle <= 135.0):
+                    is_seated_pose = True
+                elif hip_mid is not None and hip_mid[1] >= (h * 0.42):
+                    is_seated_pose = True
+                elif skeleton_data["detected"] and skeleton_data["posture_stability"] in ["STABLE", "IDLE"]:
+                    is_seated_pose = True
+
+                if is_seated_pose or self.moa1_is_seated:
+                    if self.moa1_s02_hold_start is None:
+                        self.moa1_s02_hold_start = current_time
+                    self.moa1_s02_hold_duration += dt
+                    if self.moa1_s02_hold_duration >= 0.8:
+                        self.moa1_is_seated = True
+                        active_step.status = "completed"
+                        active_step.completed_at = current_time
+                        self._advance_step(current_time)
+                        active_step = self.steps[self.step_idx] if self.step_idx < len(self.steps) else None
+                        self._trigger_alert(
+                            step_id="S02",
+                            severity="info",
+                            kind="step_complete",
+                            message="Seated posture confirmed. Now pick up the smartphone from the desk.",
+                            tts="Seated posture confirmed. Pick up the smartphone.",
+                            t=current_time,
+                        )
+                else:
+                    self.moa1_s02_hold_start = None
+                    self.moa1_s02_hold_duration = max(0.0, self.moa1_s02_hold_duration - dt * 0.3)
+
+            # -----------------------------------------------------------------
+            # S03: Pick Up Smartphone
+            # -----------------------------------------------------------------
+            elif active_step.id == "S03":
+                phone_grasped = (phone_wrist_dist <= 75.0) or (phone_box is not None and phone_wrist_dist <= 95.0)
+                is_phone_lifted = False
+                if phone_box is not None and self.moa1_initial_phone_y is not None:
+                    pcy = (phone_box[1] + phone_box[3]) / 2.0
+                    if (self.moa1_initial_phone_y - pcy) >= 15.0:
+                        is_phone_lifted = True
+                if phone_grasped or is_phone_lifted or self.moa1_phone_picked:
+                    if self.moa1_s03_hold_start is None:
+                        self.moa1_s03_hold_start = current_time
+                    self.moa1_s03_hold_duration += dt
+                    if self.moa1_s03_hold_duration >= 0.6:
+                        self.moa1_phone_picked = True
+                        active_step.status = "completed"
+                        active_step.completed_at = current_time
+                        self._advance_step(current_time)
+                        active_step = self.steps[self.step_idx] if self.step_idx < len(self.steps) else None
+                        self._trigger_alert(
+                            step_id="S03",
+                            severity="info",
+                            kind="step_complete",
+                            message="Smartphone picked up. Place it back down onto the desk surface.",
+                            tts="Phone picked up. Return the smartphone to the desk.",
+                            t=current_time,
+                        )
+                else:
+                    self.moa1_s03_hold_start = None
+                    self.moa1_s03_hold_duration = max(0.0, self.moa1_s03_hold_duration - dt * 0.3)
+
+            # -----------------------------------------------------------------
+            # S04: Return Smartphone to Desk
+            # -----------------------------------------------------------------
+            elif active_step.id == "S04":
+                phone_stowed = (phone_wrist_dist >= 60.0) or (phone_box is not None and phone_wrist_dist >= 55.0)
+                if phone_stowed or self.moa1_phone_stowed:
+                    if self.moa1_s04_hold_start is None:
+                        self.moa1_s04_hold_start = current_time
+                    self.moa1_s04_hold_duration += dt
+                    if self.moa1_s04_hold_duration >= 0.6:
+                        self.moa1_phone_stowed = True
+                        active_step.status = "completed"
+                        active_step.completed_at = current_time
+                        self._advance_step(current_time)
+                        active_step = self.steps[self.step_idx] if self.step_idx < len(self.steps) else None
+                        self._trigger_alert(
+                            step_id="S04",
+                            severity="info",
+                            kind="step_complete",
+                            message="Smartphone stowed on desk. Next, grasp and lift the water bottle.",
+                            tts="Smartphone stowed. Grasp and lift the water bottle.",
+                            t=current_time,
+                        )
+                else:
+                    self.moa1_s04_hold_start = None
+                    self.moa1_s04_hold_duration = max(0.0, self.moa1_s04_hold_duration - dt * 0.3)
+
+            # -----------------------------------------------------------------
+            # S05: Grasp and Lift Water Bottle
+            # -----------------------------------------------------------------
+            elif active_step.id == "S05":
+                bottle_grasped = (bottle_wrist_dist <= 75.0) or (bottle_box is not None and bottle_wrist_dist <= 95.0)
+                is_bottle_lifted = False
+                if bottle_box is not None and self.moa1_initial_bottle_y is not None:
+                    bcy = (bottle_box[1] + bottle_box[3]) / 2.0
+                    if (self.moa1_initial_bottle_y - bcy) >= 20.0:
+                        is_bottle_lifted = True
+
+                is_near_mouth = False
+                if bottle_box is not None and mouth_region is not None:
+                    bcx, bcy = (bottle_box[0] + bottle_box[2]) / 2.0, bottle_box[1]
+                    if math.hypot(bcx - mouth_region[0], bcy - mouth_region[1]) <= 85.0:
+                        is_near_mouth = True
+
+                if (bottle_grasped and (is_bottle_lifted or is_near_mouth)) or is_near_mouth or self.moa1_bottle_lifted:
+                    if self.moa1_s05_hold_start is None:
+                        self.moa1_s05_hold_start = current_time
+                    self.moa1_s05_hold_duration += dt
+                    if self.moa1_s05_hold_duration >= 0.6 or is_near_mouth:
+                        self.moa1_bottle_lifted = True
+                        active_step.status = "completed"
+                        active_step.completed_at = current_time
+                        self._advance_step(current_time)
+                        active_step = self.steps[self.step_idx] if self.step_idx < len(self.steps) else None
+                        self._trigger_alert(
+                            step_id="S05",
+                            severity="info",
+                            kind="step_complete",
+                            message="Water bottle lifted. Bring to mouth and drink water (hold >= 1.5s).",
+                            tts="Bottle lifted. Bring to mouth and drink water.",
+                            t=current_time,
+                        )
+                else:
+                    self.moa1_s05_hold_start = None
+                    self.moa1_s05_hold_duration = max(0.0, self.moa1_s05_hold_duration - dt * 0.3)
+
+            # -----------------------------------------------------------------
+            # S06: Drink Water from Bottle
+            # -----------------------------------------------------------------
+            elif active_step.id == "S06":
+                dist_to_mouth = 999.0
+                if mouth_region is not None:
+                    if bottle_box is not None:
+                        bcx = (bottle_box[0] + bottle_box[2]) / 2.0
+                        b_top_y = bottle_box[1]
+                        dist_to_mouth = min(dist_to_mouth, math.hypot(bcx - mouth_region[0], b_top_y - mouth_region[1]))
+                    for w_item in wrists:
+                        wx, wy = w_item["point"]
+                        dist_to_mouth = min(dist_to_mouth, math.hypot(wx - mouth_region[0], wy - mouth_region[1]))
+
+                is_drinking = (dist_to_mouth <= 85.0)
+
+                if is_drinking or self.moa1_water_consumed:
+                    if self.moa1_drinking_hold_start is None:
+                        self.moa1_drinking_hold_start = current_time
+                    self.moa1_drinking_hold_duration += dt
+                    self.moa1_last_drinking_seen_time = current_time
+
+                    if self.moa1_drinking_hold_duration >= 1.5:
+                        self.moa1_water_consumed = True
+                        active_step.status = "completed"
+                        active_step.completed_at = current_time
+                        self._advance_step(current_time)
+                        active_step = self.steps[self.step_idx] if self.step_idx < len(self.steps) else None
+                        self._trigger_alert(
+                            step_id="S06",
+                            severity="info",
+                            kind="step_complete",
+                            message="Drinking verified (held >= 1.5s). Return bottle to table and release hands.",
+                            tts="Water consumed. Return bottle to table and release hands.",
+                            t=current_time,
+                        )
+                else:
+                    if bottle_box is not None and self.moa1_initial_bottle_y is not None:
+                        bcy = (bottle_box[1] + bottle_box[3]) / 2.0
+                        if abs(bcy - self.moa1_initial_bottle_y) < 15.0 and bottle_wrist_dist > 55.0 and self.moa1_drinking_hold_duration < 0.5:
+                            self._trigger_alert(
+                                step_id="S06",
+                                severity="caution",
+                                kind="skipped",
+                                message="Step S06 skipped: Water bottle returned to table without drinking.",
+                                tts="Caution: Drink water before returning the bottle.",
+                                t=current_time,
+                            )
+                    if (current_time - self.moa1_last_drinking_seen_time) > 1.6:
+                        self.moa1_drinking_hold_start = None
+                        self.moa1_drinking_hold_duration = max(0.0, self.moa1_drinking_hold_duration - dt * 0.2)
+
+            # -----------------------------------------------------------------
+            # S07: Return Bottle to Table & Release Hands
+            # -----------------------------------------------------------------
+            elif active_step.id == "S07":
+                hands_released = (bottle_wrist_dist >= 65.0)
+                is_on_table = True
+                if bottle_box is not None and self.moa1_initial_bottle_y is not None:
+                    bcy = (bottle_box[1] + bottle_box[3]) / 2.0
+                    is_on_table = (bcy >= self.moa1_initial_bottle_y - 25.0)
+
+                if (hands_released and is_on_table) or self.moa1_bottle_returned:
+                    if self.moa1_s07_hold_start is None:
+                        self.moa1_s07_hold_start = current_time
+                    self.moa1_s07_hold_duration += dt
+                    if self.moa1_s07_hold_duration >= 0.6:
+                        self.moa1_bottle_returned = True
+                        self.protocol_complete = True
+                        active_step.status = "completed"
+                        active_step.completed_at = current_time
+                        self._advance_step(current_time)
+                        active_step = self.steps[self.step_idx] if self.step_idx < len(self.steps) else None
+                        self._trigger_alert(
+                            step_id="S07",
+                            severity="info",
+                            kind="nominal_completion",
+                            message="Multi-Object Experiment Complete! All seven activities verified nominal.",
+                            tts="Multi-object experiment complete. All seven steps verified nominal.",
+                            t=current_time,
+                        )
+                else:
+                    self.moa1_s07_hold_start = None
+                    self.moa1_s07_hold_duration = max(0.0, self.moa1_s07_hold_duration - dt * 0.3)
+
+        # 4. Render HUD
+        annotated = frame.copy()
+        self._render_moa1_hud(
+            annotated,
+            chair_box=chair_box,
+            phone_box=phone_box,
+            bottle_box=bottle_box,
+            chair_pulled=self.moa1_chair_pulled,
+            is_seated=self.moa1_is_seated,
+            knee_angle=self.moa1_knee_angle_deg,
+            phone_picked=self.moa1_phone_picked,
+            phone_stowed=self.moa1_phone_stowed,
+            bottle_lifted=self.moa1_bottle_lifted,
+            water_consumed=self.moa1_water_consumed,
+            drinking_hold_s=self.moa1_drinking_hold_duration,
+            bottle_returned=self.moa1_bottle_returned,
+            active_step=active_step,
+            current_time=current_time,
+            skeleton_data=skeleton_data,
+        )
+
+        # 5. Format Telemetry
+        completed_count = sum(1 for s in self.steps if s.status == "completed")
+        compliance_pct = int((completed_count / len(self.steps)) * 100) if self.steps else 100
+
+        step_telemetry = []
+        for s in self.steps:
+            is_verifying = False
+            pct = 0
+            if s.status == "completed":
+                pct = 100
+            elif s.status == "active":
+                if s.id == "S01":
+                    is_verifying = self.moa1_s01_hold_duration > 0
+                    pct = min(100, int((self.moa1_s01_hold_duration / 0.8) * 100))
+                elif s.id == "S02":
+                    is_verifying = self.moa1_s02_hold_duration > 0
+                    pct = min(100, int((self.moa1_s02_hold_duration / 0.8) * 100))
+                elif s.id == "S03":
+                    is_verifying = self.moa1_s03_hold_duration > 0
+                    pct = min(100, int((self.moa1_s03_hold_duration / 0.6) * 100))
+                elif s.id == "S04":
+                    is_verifying = self.moa1_s04_hold_duration > 0
+                    pct = min(100, int((self.moa1_s04_hold_duration / 0.6) * 100))
+                elif s.id == "S05":
+                    is_verifying = self.moa1_s05_hold_duration > 0
+                    pct = min(100, int((self.moa1_s05_hold_duration / 0.6) * 100))
+                elif s.id == "S06":
+                    is_verifying = self.moa1_drinking_hold_duration > 0
+                    pct = min(100, int((self.moa1_drinking_hold_duration / 1.5) * 100))
+                elif s.id == "S07":
+                    is_verifying = self.moa1_s07_hold_duration > 0
+                    pct = min(100, int((self.moa1_s07_hold_duration / 0.6) * 100))
+
+            step_telemetry.append({
+                "id": s.id,
+                "name": s.name,
+                "prompt": s.prompt,
+                "status": s.status,
+                "elapsed_s": round(s.elapsed_s, 1),
+                "is_verifying": is_verifying,
+                "verification_pct": pct,
+            })
+
+        recent_alert_payload = None
+        if self.recent_alerts and (current_time - self.recent_alerts[-1].timestamp) < 4.0:
+            a = self.recent_alerts[-1]
+            recent_alert_payload = {
+                "step_id": a.step_id,
+                "severity": a.severity,
+                "kind": a.kind,
+                "message": a.message,
+                "tts": a.spoken_tts,
+                "timestamp": a.timestamp,
+            }
+
+        telemetry = {
+            "experiment_id": self.experiment_id,
+            "experiment_title": self.title,
+            "rack_id": self.rack_id,
+            "frame_idx": self.frame_count,
+            "active_step_id": active_step.id if active_step else "DONE",
+            "active_step_name": active_step.name if active_step else "Protocol Completed",
+            "prompt": active_step.prompt if active_step else "Multi-object experiment completed nominally.",
+            "compliance_score": compliance_pct,
+            "is_complete": self.protocol_complete,
+            "chair": {
+                "detected": chair_box is not None,
+                "pulled": self.moa1_chair_pulled,
+                "hold_s": round(self.moa1_s01_hold_duration, 2),
+                "target_s": 0.8,
+                "progress_pct": min(100, int((self.moa1_s01_hold_duration / 0.8) * 100)),
+            },
+            "posture": {
+                "is_seated": self.moa1_is_seated,
+                "knee_angle_deg": round(self.moa1_knee_angle_deg, 1) if self.moa1_knee_angle_deg is not None else None,
+                "hold_s": round(self.moa1_s02_hold_duration, 2),
+                "target_s": 0.8,
+                "progress_pct": min(100, int((self.moa1_s02_hold_duration / 0.8) * 100)),
+                "status": skeleton_data["posture_status"],
+            },
+            "phone": {
+                "detected": phone_box is not None,
+                "picked": self.moa1_phone_picked,
+                "stowed": self.moa1_phone_stowed,
+                "hold_s": round(self.moa1_s03_hold_duration if not self.moa1_phone_picked else self.moa1_s04_hold_duration, 2),
+                "progress_pct": min(100, int(((self.moa1_s03_hold_duration if not self.moa1_phone_picked else self.moa1_s04_hold_duration) / 0.6) * 100)),
+            },
+            "drinking": {
+                "in_progress": self.moa1_drinking_hold_duration > 0,
+                "hold_duration_s": round(self.moa1_drinking_hold_duration, 2),
+                "target_duration_s": 1.5,
+                "progress_pct": min(100, int((self.moa1_drinking_hold_duration / 1.5) * 100)),
+                "water_consumed": self.moa1_water_consumed,
+            },
+            "bottle": {
+                "detected": bottle_box is not None,
+                "lifted": self.moa1_bottle_lifted,
+                "returned": self.moa1_bottle_returned,
+                "hands_released": self.moa1_bottle_returned or (bottle_wrist_dist >= 65.0),
+                "hold_duration_s": round(self.moa1_s07_hold_duration, 2),
+                "progress_pct": min(100, int((self.moa1_s07_hold_duration / 0.6) * 100)),
+            },
+            "steps": step_telemetry,
+            "geometry": {
+                "person_detected": skeleton_data["detected"],
+                "full_body_detected": skeleton_data["detected"] and skeleton_data["body_points_count"] >= 10,
+                "body_points_count": skeleton_data["body_points_count"],
+                "body_points_total": 17,
+                "posture_status": skeleton_data["posture_status"],
+                "posture_stability": skeleton_data["posture_stability"],
+                "torso_angle_deg": skeleton_data["torso_angle_deg"],
+                "knee_angle_deg": round(self.moa1_knee_angle_deg, 1) if self.moa1_knee_angle_deg is not None else 90.0,
+                "chair_pulled": self.moa1_chair_pulled,
+                "is_seated": self.moa1_is_seated,
+                "phone_picked": self.moa1_phone_picked,
+                "phone_stowed": self.moa1_phone_stowed,
+                "bottle_lifted": self.moa1_bottle_lifted,
+                "water_consumed": self.moa1_water_consumed,
+                "bottle_returned": self.moa1_bottle_returned,
+                "skeleton": skeleton_data["keypoints"],
+            },
+            "recent_alert": recent_alert_payload,
+            "alert_count": len(self.alerts),
+        }
+
+        return annotated, telemetry
+
+    def _render_moa1_hud(
+        self,
+        img: np.ndarray,
+        chair_box: tuple[float, float, float, float] | None,
+        phone_box: tuple[float, float, float, float] | None,
+        bottle_box: tuple[float, float, float, float] | None,
+        chair_pulled: bool,
+        is_seated: bool,
+        knee_angle: float | None,
+        phone_picked: bool,
+        phone_stowed: bool,
+        bottle_lifted: bool,
+        water_consumed: bool,
+        drinking_hold_s: float,
+        bottle_returned: bool,
+        active_step: StepState | None,
+        current_time: float,
+        skeleton_data: dict[str, Any] | None,
+    ) -> None:
+        """Renders cyberpunk aerospace HUD for MOA-1 Multi-Object Experiment."""
+        h, w = img.shape[:2]
+        overlay = img.copy()
+
+        # 1. Render Astronaut 17-Point Skeleton Rig
+        self._render_skeletal_rig(img, skeleton_data)
+
+        # 2. Top Banner Background (Translucent Glassmorphic Dark)
+        cv2.rectangle(overlay, (0, 0), (w, 54), (12, 16, 24), -1)
+        cv2.addWeighted(overlay, 0.85, img, 0.15, 0, img)
+        cv2.line(img, (0, 54), (w, 54), (45, 91, 216), 1)
+
+        # Title
+        cv2.putText(img, "PARIKSHAK MISSION CONTROL", (18, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (255, 230, 80), 1, cv2.LINE_AA)
+        cv2.putText(img, "MOA-1: MULTI-OBJECT HAR", (18, 42), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (180, 200, 220), 1, cv2.LINE_AA)
+
+        # Top Status Badges
+        # Chair Badge
+        chair_col = (60, 230, 100) if chair_pulled else (240, 180, 40)
+        chair_txt = "CHAIR: PULLED" if chair_pulled else "CHAIR: TARGET"
+        cv2.rectangle(img, (w - 380, 10), (w - 275, 42), (20, 25, 35), -1)
+        cv2.rectangle(img, (w - 380, 10), (w - 275, 42), chair_col, 1)
+        cv2.putText(img, chair_txt, (w - 372, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.36, chair_col, 1, cv2.LINE_AA)
+
+        # Sitting Posture Badge
+        seat_col = (60, 230, 100) if is_seated else (240, 180, 40)
+        seat_txt = f"SEATED {int(knee_angle)}deg" if (is_seated and knee_angle) else ("SEATED" if is_seated else "POSTURE")
+        cv2.rectangle(img, (w - 265, 10), (w - 150, 42), (20, 25, 35), -1)
+        cv2.rectangle(img, (w - 265, 10), (w - 150, 42), seat_col, 1)
+        cv2.putText(img, seat_txt, (w - 257, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.36, seat_col, 1, cv2.LINE_AA)
+
+        # Drinking / Bottle Badge
+        drink_col = (60, 230, 100) if water_consumed else (0, 220, 255)
+        drink_txt = "WATER: CONSUMED" if water_consumed else (f"DRINK: {drinking_hold_s:.1f}s" if drinking_hold_s > 0 else "BOTTLE: READY")
+        cv2.rectangle(img, (w - 140, 10), (w - 10, 42), (20, 25, 35), -1)
+        cv2.rectangle(img, (w - 140, 10), (w - 10, 42), drink_col, 1)
+        cv2.putText(img, drink_txt, (w - 132, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.34, drink_col, 1, cv2.LINE_AA)
+
+        # 3. Draw Bounding Boxes
+        # A. Chair Box (Cyan / Electric Blue)
+        if chair_box is not None:
+            cx1, cy1, cx2, cy2 = [int(v) for v in chair_box]
+            ch_col = (60, 230, 100) if chair_pulled else (255, 220, 0)
+            cv2.rectangle(img, (cx1, cy1), (cx2, cy2), ch_col, 2)
+            cv2.rectangle(img, (cx1, cy1 - 18), (cx1 + 140, cy1), ch_col, -1)
+            ch_lbl = "CHAIR [PULLED]" if chair_pulled else "CHAIR [POSITION]"
+            cv2.putText(img, ch_lbl, (cx1 + 4, cy1 - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.36, (10, 15, 25), 1, cv2.LINE_AA)
+
+        # B. Phone Box (Amber / Gold)
+        if phone_box is not None:
+            px1, py1, px2, py2 = [int(v) for v in phone_box]
+            ph_col = (60, 230, 100) if phone_stowed else ((0, 180, 255) if phone_picked else (0, 220, 255))
+            cv2.rectangle(img, (px1, py1), (px2, py2), ph_col, 2)
+            cv2.rectangle(img, (px1, py1 - 18), (px1 + 130, py1), ph_col, -1)
+            ph_lbl = "PHONE [STOWED]" if phone_stowed else ("PHONE [LIFTED]" if phone_picked else "PHONE [DESK]")
+            cv2.putText(img, ph_lbl, (px1 + 4, py1 - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.36, (10, 15, 25), 1, cv2.LINE_AA)
+
+        # C. Bottle Box (Emerald Green)
+        if bottle_box is not None:
+            bx1, by1, bx2, by2 = [int(v) for v in bottle_box]
+            bt_col = (60, 230, 100) if water_consumed else (60, 240, 120)
+            cv2.rectangle(img, (bx1, by1), (bx2, by2), bt_col, 2)
+            cv2.rectangle(img, (bx1, by1 - 18), (bx1 + 130, by1), bt_col, -1)
+            bt_lbl = "BOTTLE [DRUNK]" if water_consumed else ("BOTTLE [LIFTED]" if bottle_lifted else "BOTTLE [TABLE]")
+            cv2.putText(img, bt_lbl, (bx1 + 4, by1 - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.36, (10, 15, 25), 1, cv2.LINE_AA)
+
+        # 4. Step Progress Bar
+        if active_step:
+            if active_step.id == "S01":
+                pct = min(1.0, self.moa1_s01_hold_duration / 0.8)
+                cv2.rectangle(img, (w // 2 - 140, 62), (w // 2 + 140, 88), (20, 25, 35), -1)
+                cv2.rectangle(img, (w // 2 - 140, 62), (w // 2 - 140 + int(280 * pct), 88), (255, 200, 0), -1)
+                cv2.rectangle(img, (w // 2 - 140, 62), (w // 2 + 140, 88), (255, 230, 80), 1)
+                cv2.putText(img, f"PULL CHAIR INTO DESK: {int(pct * 100)}%", (w // 2 - 120, 81), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (255, 255, 255), 1, cv2.LINE_AA)
+
+            elif active_step.id == "S02":
+                pct = min(1.0, self.moa1_s02_hold_duration / 0.8)
+                cv2.rectangle(img, (w // 2 - 140, 62), (w // 2 + 140, 88), (20, 25, 35), -1)
+                cv2.rectangle(img, (w // 2 - 140, 62), (w // 2 - 140 + int(280 * pct), 88), (40, 220, 120), -1)
+                cv2.rectangle(img, (w // 2 - 140, 62), (w // 2 + 140, 88), (80, 250, 160), 1)
+                angle_str = f" ({int(knee_angle)}deg)" if knee_angle else ""
+                cv2.putText(img, f"SIT DOWN ON CHAIR: {int(pct * 100)}%{angle_str}", (w // 2 - 125, 81), cv2.FONT_HERSHEY_SIMPLEX, 0.40, (255, 255, 255), 1, cv2.LINE_AA)
+
+            elif active_step.id == "S03":
+                pct = min(1.0, self.moa1_s03_hold_duration / 0.6)
+                cv2.rectangle(img, (w // 2 - 140, 62), (w // 2 + 140, 88), (20, 25, 35), -1)
+                cv2.rectangle(img, (w // 2 - 140, 62), (w // 2 - 140 + int(280 * pct), 88), (0, 180, 255), -1)
+                cv2.rectangle(img, (w // 2 - 140, 62), (w // 2 + 140, 88), (80, 220, 255), 1)
+                cv2.putText(img, f"PICK UP SMARTPHONE: {int(pct * 100)}%", (w // 2 - 115, 81), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (10, 15, 25), 1, cv2.LINE_AA)
+
+            elif active_step.id == "S04":
+                pct = min(1.0, self.moa1_s04_hold_duration / 0.6)
+                cv2.rectangle(img, (w // 2 - 140, 62), (w // 2 + 140, 88), (20, 25, 35), -1)
+                cv2.rectangle(img, (w // 2 - 140, 62), (w // 2 - 140 + int(280 * pct), 88), (0, 220, 240), -1)
+                cv2.rectangle(img, (w // 2 - 140, 62), (w // 2 + 140, 88), (80, 240, 255), 1)
+                cv2.putText(img, f"STOW SMARTPHONE ON DESK: {int(pct * 100)}%", (w // 2 - 130, 81), cv2.FONT_HERSHEY_SIMPLEX, 0.40, (10, 15, 25), 1, cv2.LINE_AA)
+
+            elif active_step.id == "S05":
+                pct = min(1.0, self.moa1_s05_hold_duration / 0.6)
+                cv2.rectangle(img, (w // 2 - 140, 62), (w // 2 + 140, 88), (20, 25, 35), -1)
+                cv2.rectangle(img, (w // 2 - 140, 62), (w // 2 - 140 + int(280 * pct), 88), (60, 230, 100), -1)
+                cv2.rectangle(img, (w // 2 - 140, 62), (w // 2 + 140, 88), (100, 255, 140), 1)
+                cv2.putText(img, f"GRASP & LIFT BOTTLE: {int(pct * 100)}%", (w // 2 - 110, 81), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (255, 255, 255), 1, cv2.LINE_AA)
+
+            elif active_step.id == "S06":
+                pct = min(1.0, drinking_hold_s / 1.5)
+                bar_w = int(280 * pct)
+                cv2.rectangle(img, (w // 2 - 140, 62), (w // 2 + 140, 88), (20, 25, 35), -1)
+                fill_color = (60, 230, 100) if drinking_hold_s > 0 else (40, 140, 255)
+                cv2.rectangle(img, (w // 2 - 140, 62), (w // 2 - 140 + bar_w, 88), fill_color, -1)
+                cv2.rectangle(img, (w // 2 - 140, 62), (w // 2 + 140, 88), (80, 180, 250), 1)
+                drink_lbl = f"DRINKING HOLD: {int(pct * 100)}% ({drinking_hold_s:.1f}s / 1.5s)" if drinking_hold_s > 0 else "BRING BOTTLE TO MOUTH TO DRINK"
+                cv2.putText(img, drink_lbl, (w // 2 - 130, 81), cv2.FONT_HERSHEY_SIMPLEX, 0.40, (255, 255, 255), 1, cv2.LINE_AA)
+
+            elif active_step.id == "S07":
+                pct = min(1.0, self.moa1_s07_hold_duration / 0.6)
+                bar_w = int(280 * pct)
+                cv2.rectangle(img, (w // 2 - 140, 62), (w // 2 + 140, 88), (20, 25, 35), -1)
+                cv2.rectangle(img, (w // 2 - 140, 62), (w // 2 - 140 + bar_w, 88), (60, 230, 100), -1)
+                cv2.rectangle(img, (w // 2 - 140, 62), (w // 2 + 140, 88), (80, 240, 180), 1)
+                cv2.putText(img, f"RETURN BOTTLE & RELEASE: {int(pct * 100)}%", (w // 2 - 125, 81), cv2.FONT_HERSHEY_SIMPLEX, 0.40, (255, 255, 255), 1, cv2.LINE_AA)
+
+        elif self.protocol_complete:
+            cv2.rectangle(img, (w // 2 - 150, 62), (w // 2 + 150, 88), (20, 35, 25), -1)
+            cv2.rectangle(img, (w // 2 - 150, 62), (w // 2 + 150, 88), (60, 220, 100), -1)
+            cv2.putText(img, "ALL 7 ACTIVITIES VERIFIED NOMINAL", (w // 2 - 135, 81), cv2.FONT_HERSHEY_SIMPLEX, 0.44, (255, 255, 255), 1, cv2.LINE_AA)
+
+        # 5. Bottom Prompt & Alert Bar
+        has_alert = bool(self.recent_alerts and (current_time - self.recent_alerts[-1].timestamp) < 4.0)
+        cv2.rectangle(overlay, (0, h - 60), (w, h), (15, 20, 28), -1)
+        cv2.addWeighted(overlay, 0.85, img, 0.15, 0, img)
+        cv2.line(img, (0, h - 60), (w, h - 60), (45, 91, 216), 1)
+
+        if has_alert:
+            alert = self.recent_alerts[-1]
+            cv2.putText(img, f"ALERT [{alert.kind.upper()}]: {alert.message}", (25, h - 25), cv2.FONT_HERSHEY_SIMPLEX, 0.50, (80, 80, 255), 2, cv2.LINE_AA)
         elif active_step:
             step_prompt = f"[{active_step.id}] {active_step.prompt}"
             cv2.putText(img, step_prompt, (25, h - 25), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (240, 245, 250), 1, cv2.LINE_AA)

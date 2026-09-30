@@ -24,7 +24,7 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 class TrackerService:
     """Singleton-style coordinator for live and replay experiment tracking."""
 
-    def __init__(self, experiment_id: str = "BCX-1") -> None:
+    def __init__(self, experiment_id: str = "MOA-1") -> None:
         self.lock = threading.RLock()
         self.experiment_id = experiment_id
         self.tracker = YoloExperimentTracker(self.experiment_id)
@@ -495,6 +495,137 @@ class TrackerService:
                     tts="Hazard warning: Collision must occur inside the container.",
                     t=now,
                 )
+            elif event_name == "moa1_pull_chair":
+                self.tracker.moa1_chair_pulled = True
+                self.tracker.moa1_s01_hold_duration = 0.8
+                for s in self.tracker.steps:
+                    if s.id == "S01":
+                        s.status = "completed"
+                        s.completed_at = now
+                self.tracker._advance_step(now)
+                self.tracker._trigger_alert(
+                    step_id="S01",
+                    severity="info",
+                    kind="step_complete",
+                    message="Chair pulled into position. Now sit down on the chair.",
+                    tts="Chair positioned. Please sit down on the chair.",
+                    t=now,
+                )
+            elif event_name == "moa1_sit":
+                self.tracker.moa1_chair_pulled = True
+                self.tracker.moa1_is_seated = True
+                self.tracker.moa1_knee_angle_deg = 92.5
+                self.tracker.moa1_s02_hold_duration = 0.8
+                for s in self.tracker.steps:
+                    if s.id in ["S01", "S02"]:
+                        s.status = "completed"
+                        s.completed_at = now
+                self.tracker._advance_step(now)
+                self.tracker._trigger_alert(
+                    step_id="S02",
+                    severity="info",
+                    kind="step_complete",
+                    message="Seated posture confirmed (knee angle 92.5°). Pick up the smartphone.",
+                    tts="Seated posture confirmed. Pick up the smartphone.",
+                    t=now,
+                )
+            elif event_name == "moa1_phone_pickup":
+                self.tracker.moa1_is_seated = True
+                self.tracker.moa1_phone_picked = True
+                self.tracker.moa1_s03_hold_duration = 0.6
+                for s in self.tracker.steps:
+                    if s.id in ["S01", "S02", "S03"]:
+                        s.status = "completed"
+                        s.completed_at = now
+                self.tracker._advance_step(now)
+                self.tracker._trigger_alert(
+                    step_id="S03",
+                    severity="info",
+                    kind="step_complete",
+                    message="Smartphone picked up. Place it back down onto the desk surface.",
+                    tts="Phone picked up. Return the smartphone to the desk.",
+                    t=now,
+                )
+            elif event_name == "moa1_phone_stow":
+                self.tracker.moa1_phone_picked = True
+                self.tracker.moa1_phone_stowed = True
+                self.tracker.moa1_s04_hold_duration = 0.6
+                for s in self.tracker.steps:
+                    if s.id in ["S01", "S02", "S03", "S04"]:
+                        s.status = "completed"
+                        s.completed_at = now
+                self.tracker._advance_step(now)
+                self.tracker._trigger_alert(
+                    step_id="S04",
+                    severity="info",
+                    kind="step_complete",
+                    message="Smartphone stowed on desk. Next, grasp and lift the water bottle.",
+                    tts="Smartphone stowed. Grasp and lift the water bottle.",
+                    t=now,
+                )
+            elif event_name == "moa1_bottle_lift":
+                self.tracker.moa1_bottle_lifted = True
+                self.tracker.moa1_s05_hold_duration = 0.6
+                for s in self.tracker.steps:
+                    if s.id in ["S01", "S02", "S03", "S04", "S05"]:
+                        s.status = "completed"
+                        s.completed_at = now
+                self.tracker._advance_step(now)
+                self.tracker._trigger_alert(
+                    step_id="S05",
+                    severity="info",
+                    kind="step_complete",
+                    message="Water bottle lifted. Bring to mouth and drink water (hold >= 1.5s).",
+                    tts="Bottle lifted. Bring to mouth and drink water.",
+                    t=now,
+                )
+            elif event_name == "moa1_drink":
+                self.tracker.moa1_bottle_lifted = True
+                self.tracker.moa1_drinking_hold_duration = 1.5
+                self.tracker.moa1_water_consumed = True
+                for s in self.tracker.steps:
+                    if s.id in ["S01", "S02", "S03", "S04", "S05", "S06"]:
+                        s.status = "completed"
+                        s.completed_at = now
+                self.tracker._advance_step(now)
+                self.tracker._trigger_alert(
+                    step_id="S06",
+                    severity="info",
+                    kind="step_complete",
+                    message="Drinking verified (held >= 1.5s). Return bottle to table and release hands.",
+                    tts="Water consumed. Return bottle to table and release hands.",
+                    t=now,
+                )
+            elif event_name == "moa1_bottle_return":
+                self.tracker.moa1_bottle_returned = True
+                self.tracker.protocol_complete = True
+                self.tracker.moa1_s07_hold_duration = 0.6
+                for s in self.tracker.steps:
+                    s.status = "completed"
+                    s.completed_at = now
+                self.tracker._advance_step(now)
+                self.tracker._trigger_alert(
+                    step_id="S07",
+                    severity="info",
+                    kind="nominal_completion",
+                    message="Multi-Object Experiment Complete! All seven activities verified nominal.",
+                    tts="Multi-object experiment complete. All seven steps verified nominal.",
+                    t=now,
+                )
+            elif event_name == "moa1_skip_drink":
+                for s in self.tracker.steps:
+                    if s.id == "S06":
+                        s.status = "skipped"
+                        break
+                self.tracker.moa1_water_consumed = False
+                self.tracker._trigger_alert(
+                    step_id="S06",
+                    severity="critical",
+                    kind="skipped",
+                    message="Step S06 skipped! Water bottle returned to table without drinking.",
+                    tts="Warning: Step skipped. Drink water from the bottle before returning it.",
+                    t=now,
+                )
             elif event_name == "reset":
                 self.tracker.reset()
 
@@ -511,5 +642,5 @@ _service: TrackerService | None = None
 def get_tracker_service() -> TrackerService:
     global _service
     if _service is None:
-        _service = TrackerService("BCX-1")
+        _service = TrackerService("MOA-1")
     return _service

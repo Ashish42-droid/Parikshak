@@ -365,7 +365,8 @@ td.num { text-align: right; }
           <div class="tracker-select-group">
             <label for="t-exp-select">Active Experiment Procedure</label>
             <select id="t-exp-select">
-              <option value="BCX-1" selected>BCX-1 : Two-Box Collision in Container (Red &amp; Yellow Box)</option>
+              <option value="MOA-1" selected>Multi Object Experiment (Chair, Phone &amp; Bottle)</option>
+              <option value="BCX-1">BCX-1 : Two-Box Collision in Container (Red &amp; Yellow Box)</option>
               <option value="WBP-1">WBP-1 : Water Bottle Protocol (Interactive Benchmark &amp; Demo)</option>
               <option value="CRX-2">CRX-2 : Colloid Resuspension and Cold Return (Space Mission · ISRO BAS)</option>
               <option value="CSP-1">CSP-1 : Colloid Sample Processing (Space Mission · MSG-A Rack)</option>
@@ -453,6 +454,14 @@ td.num { text-align: right; }
               <button class="action-btn warn" id="sim-skip">⚠ Inject Skip (Deviation Alert)</button>
               <button class="action-btn danger" id="sim-bcx-col">💥 Simulate Box Collision (BCX-1)</button>
               <button class="action-btn warn" id="sim-bcx-skip">⚠ Skip Red Box (BCX-1)</button>
+              <button class="action-btn secondary" id="sim-moa-chair">🪑 Pull Chair (MOA-1)</button>
+              <button class="action-btn secondary" id="sim-moa-sit">🧘 Sit on Chair (MOA-1)</button>
+              <button class="action-btn secondary" id="sim-moa-phone">📱 Pick Up Phone (MOA-1)</button>
+              <button class="action-btn secondary" id="sim-moa-stow">📥 Stow Phone (MOA-1)</button>
+              <button class="action-btn secondary" id="sim-moa-bottle">🍶 Lift Bottle (MOA-1)</button>
+              <button class="action-btn danger" id="sim-moa-drink">💧 Drink Water (MOA-1)</button>
+              <button class="action-btn secondary" id="sim-moa-return">🏁 Return Bottle (MOA-1)</button>
+              <button class="action-btn warn" id="sim-moa-skip">⚠ Skip Drink (MOA-1)</button>
               <button class="action-btn danger" id="sim-wrong">✕ Inject Wrong Object</button>
             </div>
           </div>
@@ -509,6 +518,20 @@ td.num { text-align: right; }
               </div>
               <div id="t-collision-hint" style="font-size:12px; color:var(--ink-2); margin-top:6px;">
                 Bring Red Box and Yellow Box together inside container to collide.
+              </div>
+            </div>
+
+            <!-- Real-Time MOA-1 Multi-Object Verification Widget -->
+            <div id="t-moa-container" style="display:none; margin: 12px 0 6px; background: rgba(0,0,0,0.22); border: 1px solid #00f0ff; border-radius: 8px; padding: 12px 14px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; margin-bottom:6px;">
+                <span id="t-moa-label" style="color:#00f0ff;">🪑 Multi-Object Activity Progress</span>
+                <span id="t-moa-pct" class="mono" style="color:var(--ink); font-size:13px;">0%</span>
+              </div>
+              <div style="background: rgba(255,255,255,0.12); border-radius: 6px; height: 12px; overflow: hidden; position: relative;">
+                <div id="t-moa-bar" style="background: #00f0ff; width: 0%; height: 100%; transition: width 0.15s ease; border-radius: 6px;"></div>
+              </div>
+              <div id="t-moa-hint" style="font-size:12px; color:var(--ink-2); margin-top:6px;">
+                S01 Pull Chair -> S02 Sit -> S03 Pick Up Phone -> S04 Stow Phone -> S05 Lift Bottle -> S06 Drink Water -> S07 Return Bottle.
               </div>
             </div>
 
@@ -2592,6 +2615,63 @@ td.num { text-align: right; }
       });
     }
 
+    const simMoaChair = $("#sim-moa-chair");
+    if (simMoaChair) {
+      simMoaChair.addEventListener("click", async () => {
+        const telem = await api.trackerSimulate("moa1_pull_chair");
+        updateTrackerUI(telem);
+      });
+    }
+    const simMoaSit = $("#sim-moa-sit");
+    if (simMoaSit) {
+      simMoaSit.addEventListener("click", async () => {
+        const telem = await api.trackerSimulate("moa1_sit");
+        updateTrackerUI(telem);
+      });
+    }
+    const simMoaPhone = $("#sim-moa-phone");
+    if (simMoaPhone) {
+      simMoaPhone.addEventListener("click", async () => {
+        const telem = await api.trackerSimulate("moa1_phone_pickup");
+        updateTrackerUI(telem);
+      });
+    }
+    const simMoaStow = $("#sim-moa-stow");
+    if (simMoaStow) {
+      simMoaStow.addEventListener("click", async () => {
+        const telem = await api.trackerSimulate("moa1_phone_stow");
+        updateTrackerUI(telem);
+      });
+    }
+    const simMoaBottle = $("#sim-moa-bottle");
+    if (simMoaBottle) {
+      simMoaBottle.addEventListener("click", async () => {
+        const telem = await api.trackerSimulate("moa1_bottle_lift");
+        updateTrackerUI(telem);
+      });
+    }
+    const simMoaDrink = $("#sim-moa-drink");
+    if (simMoaDrink) {
+      simMoaDrink.addEventListener("click", async () => {
+        const telem = await api.trackerSimulate("moa1_drink");
+        updateTrackerUI(telem);
+      });
+    }
+    const simMoaReturn = $("#sim-moa-return");
+    if (simMoaReturn) {
+      simMoaReturn.addEventListener("click", async () => {
+        const telem = await api.trackerSimulate("moa1_bottle_return");
+        updateTrackerUI(telem);
+      });
+    }
+    const simMoaSkip = $("#sim-moa-skip");
+    if (simMoaSkip) {
+      simMoaSkip.addEventListener("click", async () => {
+        const telem = await api.trackerSimulate("moa1_skip_drink");
+        updateTrackerUI(telem);
+      });
+    }
+
     sel.addEventListener("change", async () => {
       stopTrackerLoop();
       if (feedAutoShutoffTimer) {
@@ -2636,11 +2716,12 @@ td.num { text-align: right; }
         if (expData && expData.experiments) {
           sel.replaceChildren();
           for (const exp of expData.experiments) {
-            const opt = node("option", { value: exp.id }, `${exp.id} : ${exp.title}`);
+            const label = exp.title.startsWith(exp.id) ? exp.title : `${exp.id} : ${exp.title}`;
+            const opt = node("option", { value: exp.id }, label);
             sel.appendChild(opt);
           }
           if (expData.experiments.length > 0) {
-            sel.value = expData.experiments[0].id;
+            sel.value = "MOA-1";
           }
         }
       } catch (e) {
@@ -2663,9 +2744,9 @@ td.num { text-align: right; }
         console.warn("Could not list hardware cameras:", e);
       }
 
-      // Explicitly set experiment to selected procedure (BCX-1) so steps and prompts synchronize
+      // Explicitly set experiment to selected procedure (MOA-1) so steps and prompts synchronize
       try {
-        const activeExp = sel.value || "BCX-1";
+        const activeExp = sel.value || "MOA-1";
         const telem = await api.trackerSetExperiment(activeExp);
         if (telem) updateTrackerUI(telem);
       } catch (e) {
@@ -3057,6 +3138,80 @@ td.num { text-align: right; }
       }
     }
 
+    // Update MOA-1 Multi-Object Activity Widget
+    const moaBox = $("#t-moa-container");
+    if (moaBox) {
+      if (telem.experiment_id === "MOA-1" || telem.chair || telem.phone) {
+        moaBox.style.display = "block";
+        const ch = telem.chair || {};
+        const pos = telem.posture || {};
+        const ph = telem.phone || {};
+        const dr = telem.drinking || {};
+        const bt = telem.bottle || {};
+        const actId = telem.active_step_id;
+
+        if (telem.is_complete) {
+          $("#t-moa-pct").textContent = "100% (Complete)";
+          $("#t-moa-bar").style.width = "100%";
+          $("#t-moa-bar").style.background = "var(--ok)";
+          $("#t-moa-label").textContent = "✓ Multi-Object Experiment Verified Nominal";
+          $("#t-moa-hint").textContent = "All 7 activities verified: Chair pulled, astronaut seated, phone interacted, and water consumed.";
+        } else if (actId === "S01") {
+          const p = ch.progress_pct || 0;
+          $("#t-moa-pct").textContent = `${p}% (${ch.hold_s || 0}s / 0.8s)`;
+          $("#t-moa-bar").style.width = `${p}%`;
+          $("#t-moa-bar").style.background = "#FFD600";
+          $("#t-moa-label").textContent = "🪑 S01: PULL CHAIR INTO DESK";
+          $("#t-moa-hint").textContent = "Grasp the chair and pull it into position at your desk.";
+        } else if (actId === "S02") {
+          const p = pos.progress_pct || 0;
+          const kStr = pos.knee_angle_deg ? ` (Knee: ${pos.knee_angle_deg}°)` : "";
+          $("#t-moa-pct").textContent = `${p}% (${pos.hold_s || 0}s / 0.8s)${kStr}`;
+          $("#t-moa-bar").style.width = `${p}%`;
+          $("#t-moa-bar").style.background = "var(--ok)";
+          $("#t-moa-label").textContent = "🧘 S02: SIT DOWN ON CHAIR";
+          $("#t-moa-hint").textContent = "Sit down in an ergonomic posture with knee angle ~90°.";
+        } else if (actId === "S03") {
+          const p = ph.progress_pct || 0;
+          $("#t-moa-pct").textContent = `${p}% (${ph.hold_s || 0}s / 0.6s)`;
+          $("#t-moa-bar").style.width = `${p}%`;
+          $("#t-moa-bar").style.background = "#00f0ff";
+          $("#t-moa-label").textContent = "📱 S03: PICK UP SMARTPHONE";
+          $("#t-moa-hint").textContent = "Grasp and lift smartphone from the desk.";
+        } else if (actId === "S04") {
+          const p = ph.progress_pct || 0;
+          $("#t-moa-pct").textContent = `${p}% (${ph.hold_s || 0}s / 0.6s)`;
+          $("#t-moa-bar").style.width = `${p}%`;
+          $("#t-moa-bar").style.background = "var(--ok)";
+          $("#t-moa-label").textContent = "📥 S04: STOW SMARTPHONE ON DESK";
+          $("#t-moa-hint").textContent = "Place smartphone back onto desk surface and release hands.";
+        } else if (actId === "S05") {
+          const p = bt.progress_pct || 0;
+          $("#t-moa-pct").textContent = `${p}% (${bt.hold_s || 0}s / 0.6s)`;
+          $("#t-moa-bar").style.width = `${p}%`;
+          $("#t-moa-bar").style.background = "var(--ok)";
+          $("#t-moa-label").textContent = "🍶 S05: GRASP & LIFT WATER BOTTLE";
+          $("#t-moa-hint").textContent = "Grasp water bottle and lift it off the desk.";
+        } else if (actId === "S06") {
+          const p = dr.progress_pct || 0;
+          $("#t-moa-pct").textContent = `${p}% (${dr.hold_duration_s || 0}s / 1.5s)`;
+          $("#t-moa-bar").style.width = `${p}%`;
+          $("#t-moa-bar").style.background = dr.in_progress ? "var(--ok)" : "var(--warn)";
+          $("#t-moa-label").textContent = `💧 S06: DRINK WATER (HOLD >= 1.5s)`;
+          $("#t-moa-hint").textContent = "Bring bottle to mouth and drink water continuously.";
+        } else if (actId === "S07") {
+          const p = bt.progress_pct || 0;
+          $("#t-moa-pct").textContent = `${p}% (${bt.hold_s || 0}s / 0.6s)`;
+          $("#t-moa-bar").style.width = `${p}%`;
+          $("#t-moa-bar").style.background = "var(--ok)";
+          $("#t-moa-label").textContent = "🏁 S07: RETURN BOTTLE & RELEASE HANDS";
+          $("#t-moa-hint").textContent = "Return bottle to table surface and release hands to complete.";
+        }
+      } else {
+        moaBox.style.display = "none";
+      }
+    }
+
     // Update BCX-1 Box Collision Dynamics Widget
     const colBox = $("#t-collision-container");
     if (colBox) {
@@ -3118,7 +3273,38 @@ td.num { text-align: right; }
       const mouthEl = $("#t-geom-mouth");
       const poseEl = $("#t-geom-pose");
 
-      if (telem.experiment_id === "BCX-1") {
+      if (telem.experiment_id === "MOA-1") {
+        if ($("#t-geom-l1")) $("#t-geom-l1").textContent = "Chair";
+        if ($("#t-geom-l2")) $("#t-geom-l2").textContent = "Posture";
+        if ($("#t-geom-l3")) $("#t-geom-l3").textContent = "Phone";
+        if ($("#t-geom-l4")) $("#t-geom-l4").textContent = "Bottle";
+        const ch = telem.chair || {};
+        const pos = telem.posture || {};
+        const ph = telem.phone || {};
+        const bt = telem.bottle || {};
+        const dr = telem.drinking || {};
+
+        if (graspEl) {
+          graspEl.textContent = ch.pulled ? "PULLED" : (ch.detected ? "TARGET" : "NO");
+          graspEl.style.color = ch.pulled ? "var(--ok)" : "var(--warn)";
+        }
+        if (liftEl) {
+          liftEl.textContent = pos.is_seated ? (pos.knee_angle_deg ? `${Math.round(pos.knee_angle_deg)}°` : "SEATED") : "STAND";
+          liftEl.style.color = pos.is_seated ? "var(--ok)" : "var(--warn)";
+        }
+        if (mouthEl) {
+          mouthEl.textContent = ph.stowed ? "STOWED" : (ph.picked ? "IN-HAND" : (ph.detected ? "DESK" : "NO"));
+          mouthEl.style.color = ph.picked ? "var(--accent)" : (ph.stowed ? "var(--ok)" : "var(--ink-2)");
+        }
+        if (poseEl) {
+          poseEl.textContent = dr.water_consumed ? "CONSUMED" : (dr.in_progress ? `${dr.hold_duration_s}s` : (bt.lifted ? "LIFTED" : "TABLE"));
+          poseEl.style.color = dr.water_consumed ? "var(--ok)" : (dr.in_progress ? "var(--accent)" : "var(--ink-2)");
+        }
+      } else if (telem.experiment_id === "BCX-1") {
+        if ($("#t-geom-l1")) $("#t-geom-l1").textContent = "Red Box";
+        if ($("#t-geom-l2")) $("#t-geom-l2").textContent = "Yellow Box";
+        if ($("#t-geom-l3")) $("#t-geom-l3").textContent = "Distance";
+        if ($("#t-geom-l4")) $("#t-geom-l4").textContent = "Collision";
         if (graspEl) {
           graspEl.textContent = g.red_inside ? "IN" : (g.red_box_detected ? "OUT" : "NO");
           graspEl.style.color = g.red_inside ? "var(--ok)" : (g.red_box_detected ? "var(--warn)" : "var(--ink-2)");
@@ -3136,6 +3322,10 @@ td.num { text-align: right; }
           poseEl.style.color = g.is_colliding ? "var(--crit)" : "var(--accent)";
         }
       } else {
+        if ($("#t-geom-l1")) $("#t-geom-l1").textContent = "Target";
+        if ($("#t-geom-l2")) $("#t-geom-l2").textContent = "Lift";
+        if ($("#t-geom-l3")) $("#t-geom-l3").textContent = "Mouth";
+        if ($("#t-geom-l4")) $("#t-geom-l4").textContent = "Drinking";
         if (graspEl) {
           graspEl.textContent = g.hand_contact ? "YES" : (g.closest_wrist_px ? `${Math.round(g.closest_wrist_px)}px` : "NO");
           graspEl.style.color = g.hand_contact ? "var(--ok)" : "var(--ink-2)";
@@ -3159,7 +3349,23 @@ td.num { text-align: right; }
     if (telem.active_step_id && telem.active_step_id !== lastStepSpoken) {
       const prev = lastStepSpoken;
       lastStepSpoken = telem.active_step_id;
-      if (telem.experiment_id === "BCX-1") {
+      if (telem.experiment_id === "MOA-1") {
+        if (prev === "S01" && telem.active_step_id === "S02") {
+          speak("Chair positioned. Proceed to step two: sit down on the chair.", { isAlert: false, pitch: 0.95, rate: 0.92 });
+        } else if (prev === "S02" && telem.active_step_id === "S03") {
+          speak("Seated posture confirmed. Proceed to step three: pick up the smartphone.", { isAlert: false, pitch: 0.95, rate: 0.92 });
+        } else if (prev === "S03" && telem.active_step_id === "S04") {
+          speak("Phone picked up. Proceed to step four: return the smartphone to the desk.", { isAlert: false, pitch: 0.95, rate: 0.92 });
+        } else if (prev === "S04" && telem.active_step_id === "S05") {
+          speak("Smartphone stowed. Proceed to step five: grasp and lift the water bottle.", { isAlert: false, pitch: 0.95, rate: 0.92 });
+        } else if (prev === "S05" && telem.active_step_id === "S06") {
+          speak("Bottle lifted. Proceed to step six: bring bottle to mouth and drink water.", { isAlert: false, pitch: 0.95, rate: 0.92 });
+        } else if (prev === "S06" && telem.active_step_id === "S07") {
+          speak("Water consumed. Proceed to step seven: return the bottle to table and release hands.", { isAlert: false, pitch: 0.95, rate: 0.92 });
+        } else if (activeStepObj) {
+          speak(`Active step ${telem.active_step_id}: ${activeStepObj.prompt}`, { isAlert: false, pitch: 0.95, rate: 0.92 });
+        }
+      } else if (telem.experiment_id === "BCX-1") {
         if (prev === "S01" && telem.active_step_id === "S02") {
           speak("Container box identified and locked. Proceed to step two: present both Red and Yellow boxes to verify colors.", { isAlert: false, pitch: 0.95, rate: 0.92 });
         } else if (prev === "S02" && telem.active_step_id === "S03") {
@@ -3186,7 +3392,9 @@ td.num { text-align: right; }
 
     if (telem.is_complete && !protocolDoneSpoken) {
       protocolDoneSpoken = true;
-      if (telem.experiment_id === "BCX-1") {
+      if (telem.experiment_id === "MOA-1") {
+        speak("Multi-object experiment complete. All seven steps verified nominal.", { isAlert: false, pitch: 0.95, rate: 0.92 });
+      } else if (telem.experiment_id === "BCX-1") {
         speak("Two-box collision experiment complete. All six steps verified nominal.", { isAlert: false, pitch: 0.95, rate: 0.92 });
       } else {
         speak("Water bottle protocol complete. All steps verified nominal.", { isAlert: false, pitch: 0.95, rate: 0.92 });
