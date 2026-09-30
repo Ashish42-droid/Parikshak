@@ -212,3 +212,45 @@ class TestMoa1Tracker:
         assert len(pdf_bytes) > 500
         # Valid PDF file header
         assert pdf_bytes.startswith(b"%PDF")
+
+    def test_moa1_voice_alert_on_skipped_step(self):
+        service = TrackerService("MOA-1")
+        # Trigger skip via generic inject_skip
+        telem = service.simulate_event("inject_skip")
+        assert telem["recent_alert"] is not None
+        assert telem["recent_alert"]["kind"] == "skipped"
+        assert telem["recent_alert"]["tts"] is not None
+        assert len(telem["recent_alert"]["tts"]) > 0
+        assert "skipped" in telem["recent_alert"]["tts"].lower() or "warning" in telem["recent_alert"]["tts"].lower()
+
+    def test_moa1_voice_alert_on_out_of_order_step(self):
+        service = TrackerService("MOA-1")
+        # Trigger out of order via moa1_out_of_order
+        telem = service.simulate_event("moa1_out_of_order")
+        assert telem["recent_alert"] is not None
+        assert telem["recent_alert"]["kind"] == "out_of_order"
+        assert telem["recent_alert"]["tts"] is not None
+        assert len(telem["recent_alert"]["tts"]) > 0
+        assert "out of order" in telem["recent_alert"]["tts"].lower()
+
+    def test_all_experiments_voice_alerts_skip_and_order(self):
+        # BCX-1
+        bcx_svc = TrackerService("BCX-1")
+        bcx_order = bcx_svc.simulate_event("inject_out_of_order")
+        assert bcx_order["recent_alert"]["kind"] == "out_of_order"
+        assert "out of order" in bcx_order["recent_alert"]["tts"].lower()
+
+        bcx_skip = bcx_svc.simulate_event("inject_skip")
+        assert bcx_skip["recent_alert"]["kind"] == "skipped"
+        assert "skipped" in bcx_skip["recent_alert"]["tts"].lower()
+
+        # WBP-1
+        wbp_svc = TrackerService("WBP-1")
+        wbp_order = wbp_svc.simulate_event("inject_out_of_order")
+        assert wbp_order["recent_alert"]["kind"] == "out_of_order"
+        assert "out of order" in wbp_order["recent_alert"]["tts"].lower()
+
+        wbp_skip = wbp_svc.simulate_event("inject_skip")
+        assert wbp_skip["recent_alert"]["kind"] == "skipped"
+        assert "skipped" in wbp_skip["recent_alert"]["tts"].lower()
+

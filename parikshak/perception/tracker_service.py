@@ -419,19 +419,87 @@ class TrackerService:
                             self.tracker.s04_settle_duration = self.tracker.S04_TARGET_S
                     self.tracker._advance_step(now)
             elif event_name == "inject_skip":
-                # Mark step S03 as skipped
-                for s in self.tracker.steps:
-                    if s.id == "S03":
-                        s.status = "skipped"
-                        break
-                self.tracker._trigger_alert(
-                    step_id="S03",
-                    severity="caution",
-                    kind="skipped",
-                    message="Step S03 Skipped! Bottle returned to table without drinking.",
-                    tts="Warning. Step three skipped. Drink water before returning the bottle.",
-                    t=now,
-                )
+                if self.tracker.experiment_id in ["MOA-1", "MULTI-OBJ-1"]:
+                    for s in self.tracker.steps:
+                        if s.id == "S06":
+                            s.status = "skipped"
+                            break
+                    self.tracker.moa1_water_consumed = False
+                    self.tracker._trigger_alert(
+                        step_id="S06",
+                        severity="critical",
+                        kind="skipped",
+                        message="Step S06 skipped! Water bottle returned to table without drinking.",
+                        tts="Warning: Step skipped. Drink water from the bottle before returning it.",
+                        t=now,
+                    )
+                elif self.tracker.experiment_id in ["BCX-1", "BOX-COL-1"]:
+                    for s in self.tracker.steps:
+                        if s.id == "S03":
+                            s.status = "skipped"
+                            break
+                    self.tracker.bcx1_red_inside = False
+                    self.tracker.bcx1_yellow_inside = True
+                    self.tracker._trigger_alert(
+                        step_id="S03",
+                        severity="critical",
+                        kind="skipped",
+                        message="Step S03 skipped! Red box was skipped and yellow box placed instead.",
+                        tts="Warning: Step skipped. Place the red box before proceeding.",
+                        t=now,
+                    )
+                else:
+                    # Mark step S03 as skipped
+                    for s in self.tracker.steps:
+                        if s.id == "S03":
+                            s.status = "skipped"
+                            break
+                    self.tracker._trigger_alert(
+                        step_id="S03",
+                        severity="caution",
+                        kind="skipped",
+                        message="Step S03 Skipped! Bottle returned to table without drinking.",
+                        tts="Warning. Step three skipped. Drink water before returning the bottle.",
+                        t=now,
+                    )
+            elif event_name in ["inject_out_of_order", "moa1_out_of_order"]:
+                if self.tracker.experiment_id in ["MOA-1", "MULTI-OBJ-1"]:
+                    self.tracker.moa1_phone_picked = True
+                    self.tracker.moa1_is_seated = False
+                    self.tracker.moa1_chair_pulled = False
+                    cur_sid = self.tracker.steps[self.tracker.step_idx].id if self.tracker.step_idx < len(self.tracker.steps) else "S01"
+                    self.tracker._trigger_alert(
+                        step_id=cur_sid,
+                        severity="critical",
+                        kind="out_of_order",
+                        message="Out of order step detected! Pull chair and sit before picking up smartphone.",
+                        tts="Warning: Step out of order. Pull chair and sit down before picking up smartphone.",
+                        t=now,
+                    )
+                elif self.tracker.experiment_id in ["BCX-1", "BOX-COL-1"]:
+                    for s in self.tracker.steps:
+                        if s.id == "S03":
+                            s.status = "skipped"
+                            break
+                    self.tracker.bcx1_red_inside = False
+                    self.tracker.bcx1_yellow_inside = True
+                    self.tracker._trigger_alert(
+                        step_id="S03",
+                        severity="critical",
+                        kind="out_of_order",
+                        message="Out of order! Step S03 requires placing Red Box first. Yellow box detected inside.",
+                        tts="Warning: Step out of order. Place the Red Box inside the container first.",
+                        t=now,
+                    )
+                else:
+                    self.tracker._trigger_alert(
+                        step_id="S01",
+                        severity="critical",
+                        kind="out_of_order",
+                        message="Out of order! Step S01 requires resting bottle on table first to calibrate baseline.",
+                        tts="Warning: Step out of order. Place bottle on table to calibrate baseline first.",
+                        t=now,
+                    )
             elif event_name == "inject_wrong_object":
                 self.tracker._trigger_alert(
                     step_id="S02",

@@ -622,7 +622,17 @@ class YoloExperimentTracker:
                 # Requirements:
                 # 1. Target bottle detected in frame.
                 # 2. Bottle is resting in table zone (not held up in mid-air).
-                # 3. Must stay resting stably on table for >= 1.0 seconds to calibrate baseline.
+                # Check for out-of-order action during Step S01
+                if (is_lifted or is_drinking_pose) and not (target_box is not None and in_table_zone and not is_lifted):
+                    self._trigger_alert(
+                        step_id="S01",
+                        severity="critical",
+                        kind="out_of_order",
+                        message="Out of order! Step S01 requires resting bottle on table first to calibrate baseline.",
+                        tts="Warning: Step out of order. Place bottle on table to calibrate baseline first.",
+                        t=current_time,
+                    )
+
                 if target_box is not None and in_table_zone and not is_lifted:
                     if self.s01_stable_start is None:
                         self.s01_stable_start = current_time
@@ -1551,6 +1561,47 @@ class YoloExperimentTracker:
         bottle_wrist_dist = _min_dist_to_box(bottle_box)
 
         # 3. Procedure Step Verification Logic
+        # Precompute activity indicators for verification and out-of-order detection
+        is_seated_pose = False
+        if knee_angle is not None and (70.0 <= knee_angle <= 135.0):
+            is_seated_pose = True
+        elif hip_mid is not None and hip_mid[1] >= (h * 0.42):
+            is_seated_pose = True
+        elif skeleton_data["detected"] and skeleton_data["posture_stability"] in ["STABLE", "IDLE"]:
+            is_seated_pose = True
+
+        phone_grasped = (phone_wrist_dist <= 75.0) or (phone_box is not None and phone_wrist_dist <= 95.0)
+        is_phone_lifted = False
+        if phone_box is not None and self.moa1_initial_phone_y is not None:
+            pcy = (phone_box[1] + phone_box[3]) / 2.0
+            if (self.moa1_initial_phone_y - pcy) >= 15.0:
+                is_phone_lifted = True
+
+        bottle_grasped = (bottle_wrist_dist <= 75.0) or (bottle_box is not None and bottle_wrist_dist <= 95.0)
+        is_bottle_lifted = False
+        if bottle_box is not None and self.moa1_initial_bottle_y is not None:
+            bcy = (bottle_box[1] + bottle_box[3]) / 2.0
+            if (self.moa1_initial_bottle_y - bcy) >= 20.0:
+                is_bottle_lifted = True
+
+        is_near_mouth = False
+        if bottle_box is not None and mouth_region is not None:
+            bcx, bcy = (bottle_box[0] + bottle_box[2]) / 2.0, bottle_box[1]
+            if math.hypot(bcx - mouth_region[0], bcy - mouth_region[1]) <= 85.0:
+                is_near_mouth = True
+
+        dist_to_mouth = 999.0
+        if mouth_region is not None:
+            if bottle_box is not None:
+                bcx = (bottle_box[0] + bottle_box[2]) / 2.0
+                b_top_y = bottle_box[1]
+                dist_to_mouth = min(dist_to_mouth, math.hypot(bcx - mouth_region[0], b_top_y - mouth_region[1]))
+            for w_item in wrists:
+                wx, wy = w_item["point"]
+                dist_to_mouth = min(dist_to_mouth, math.hypot(wx - mouth_region[0], wy - mouth_region[1]))
+        is_drinking = (dist_to_mouth <= 85.0)
+
+        # 3. Procedure Step Verification Logic
         active_step = self.steps[self.step_idx] if self.step_idx < len(self.steps) else None
 
         if active_step:
@@ -1560,6 +1611,35 @@ class YoloExperimentTracker:
             # S01: Pull Chair into Position
             # -----------------------------------------------------------------
             if active_step.id == "S01":
+                # Out-of-order checks for Step S01
+                if is_seated_pose and not self.moa1_chair_pulled and chair_wrist_dist > 90.0:
+                    self._trigger_alert(
+                        step_id="S01",
+                        severity="critical",
+                        kind="out_of_order",
+                        message="Out of order! Step S01 requires pulling chair into position before sitting down.",
+                        tts="Warning: Step out of order. Pull chair into position before sitting down.",
+                        t=current_time,
+                    )
+                elif (phone_grasped or is_phone_lifted) and not self.moa1_chair_pulled:
+                    self._trigger_alert(
+                        step_id="S01",
+                        severity="critical",
+                        kind="out_of_order",
+                        message="Out of order! Step S01 requires positioning chair and sitting before picking up phone.",
+                        tts="Warning: Step out of order. Pull chair and sit down before picking up phone.",
+                        t=current_time,
+                    )
+                elif (bottle_grasped or is_bottle_lifted) and not self.moa1_chair_pulled:
+                    self._trigger_alert(
+                        step_id="S01",
+                        severity="critical",
+                        kind="out_of_order",
+                        message="Out of order! Step S01 requires positioning chair and sitting before touching water bottle.",
+                        tts="Warning: Step out of order. Pull chair and sit down before touching water bottle.",
+                        t=current_time,
+                    )
+
                 hand_contact_chair = (chair_wrist_dist <= 85.0) or (chair_box is not None and chair_wrist_dist <= 120.0)
                 if hand_contact_chair or self.moa1_chair_pulled:
                     if self.moa1_s01_hold_start is None:
@@ -1587,13 +1667,25 @@ class YoloExperimentTracker:
             # S02: Sit Down on Chair
             # -----------------------------------------------------------------
             elif active_step.id == "S02":
-                is_seated_pose = False
-                if knee_angle is not None and (70.0 <= knee_angle <= 135.0):
-                    is_seated_pose = True
-                elif hip_mid is not None and hip_mid[1] >= (h * 0.42):
-                    is_seated_pose = True
-                elif skeleton_data["detected"] and skeleton_data["posture_stability"] in ["STABLE", "IDLE"]:
-                    is_seated_pose = True
+                # Out-of-order checks for Step S02
+                if (phone_grasped or is_phone_lifted) and not (is_seated_pose or self.moa1_is_seated):
+                    self._trigger_alert(
+                        step_id="S02",
+                        severity="critical",
+                        kind="out_of_order",
+                        message="Out of order! Step S02 requires sitting down on the chair before picking up smartphone.",
+                        tts="Warning: Step out of order. Sit down on chair before picking up smartphone.",
+                        t=current_time,
+                    )
+                elif (bottle_grasped or is_bottle_lifted) and not (is_seated_pose or self.moa1_is_seated):
+                    self._trigger_alert(
+                        step_id="S02",
+                        severity="critical",
+                        kind="out_of_order",
+                        message="Out of order! Step S02 requires sitting down on the chair before grasping water bottle.",
+                        tts="Warning: Step out of order. Sit down on chair before grasping water bottle.",
+                        t=current_time,
+                    )
 
                 if is_seated_pose or self.moa1_is_seated:
                     if self.moa1_s02_hold_start is None:
@@ -1621,12 +1713,17 @@ class YoloExperimentTracker:
             # S03: Pick Up Smartphone
             # -----------------------------------------------------------------
             elif active_step.id == "S03":
-                phone_grasped = (phone_wrist_dist <= 75.0) or (phone_box is not None and phone_wrist_dist <= 95.0)
-                is_phone_lifted = False
-                if phone_box is not None and self.moa1_initial_phone_y is not None:
-                    pcy = (phone_box[1] + phone_box[3]) / 2.0
-                    if (self.moa1_initial_phone_y - pcy) >= 15.0:
-                        is_phone_lifted = True
+                # Out-of-order checks for Step S03
+                if (bottle_grasped or is_bottle_lifted) and not self.moa1_phone_picked:
+                    self._trigger_alert(
+                        step_id="S03",
+                        severity="critical",
+                        kind="out_of_order",
+                        message="Out of order! Step S03 requires picking up smartphone before the water bottle.",
+                        tts="Warning: Step out of order. Pick up smartphone before interacting with water bottle.",
+                        t=current_time,
+                    )
+
                 if phone_grasped or is_phone_lifted or self.moa1_phone_picked:
                     if self.moa1_s03_hold_start is None:
                         self.moa1_s03_hold_start = current_time
@@ -1653,6 +1750,17 @@ class YoloExperimentTracker:
             # S04: Return Smartphone to Desk
             # -----------------------------------------------------------------
             elif active_step.id == "S04":
+                # Out-of-order checks for Step S04
+                if (bottle_grasped or is_bottle_lifted) and not self.moa1_phone_stowed:
+                    self._trigger_alert(
+                        step_id="S04",
+                        severity="critical",
+                        kind="out_of_order",
+                        message="Out of order! Step S04 requires stowing smartphone back onto desk before lifting water bottle.",
+                        tts="Warning: Step out of order. Return phone to desk before lifting water bottle.",
+                        t=current_time,
+                    )
+
                 phone_stowed = (phone_wrist_dist >= 60.0) or (phone_box is not None and phone_wrist_dist >= 55.0)
                 if phone_stowed or self.moa1_phone_stowed:
                     if self.moa1_s04_hold_start is None:
@@ -1680,19 +1788,6 @@ class YoloExperimentTracker:
             # S05: Grasp and Lift Water Bottle
             # -----------------------------------------------------------------
             elif active_step.id == "S05":
-                bottle_grasped = (bottle_wrist_dist <= 75.0) or (bottle_box is not None and bottle_wrist_dist <= 95.0)
-                is_bottle_lifted = False
-                if bottle_box is not None and self.moa1_initial_bottle_y is not None:
-                    bcy = (bottle_box[1] + bottle_box[3]) / 2.0
-                    if (self.moa1_initial_bottle_y - bcy) >= 20.0:
-                        is_bottle_lifted = True
-
-                is_near_mouth = False
-                if bottle_box is not None and mouth_region is not None:
-                    bcx, bcy = (bottle_box[0] + bottle_box[2]) / 2.0, bottle_box[1]
-                    if math.hypot(bcx - mouth_region[0], bcy - mouth_region[1]) <= 85.0:
-                        is_near_mouth = True
-
                 if (bottle_grasped and (is_bottle_lifted or is_near_mouth)) or is_near_mouth or self.moa1_bottle_lifted:
                     if self.moa1_s05_hold_start is None:
                         self.moa1_s05_hold_start = current_time
@@ -1719,18 +1814,6 @@ class YoloExperimentTracker:
             # S06: Drink Water from Bottle
             # -----------------------------------------------------------------
             elif active_step.id == "S06":
-                dist_to_mouth = 999.0
-                if mouth_region is not None:
-                    if bottle_box is not None:
-                        bcx = (bottle_box[0] + bottle_box[2]) / 2.0
-                        b_top_y = bottle_box[1]
-                        dist_to_mouth = min(dist_to_mouth, math.hypot(bcx - mouth_region[0], b_top_y - mouth_region[1]))
-                    for w_item in wrists:
-                        wx, wy = w_item["point"]
-                        dist_to_mouth = min(dist_to_mouth, math.hypot(wx - mouth_region[0], wy - mouth_region[1]))
-
-                is_drinking = (dist_to_mouth <= 85.0)
-
                 if is_drinking or self.moa1_water_consumed:
                     if self.moa1_drinking_hold_start is None:
                         self.moa1_drinking_hold_start = current_time
@@ -1752,17 +1835,19 @@ class YoloExperimentTracker:
                             t=current_time,
                         )
                 else:
+                    # Check for skipped drinking (bottle returned to table plane without drinking)
                     if bottle_box is not None and self.moa1_initial_bottle_y is not None:
                         bcy = (bottle_box[1] + bottle_box[3]) / 2.0
-                        if abs(bcy - self.moa1_initial_bottle_y) < 15.0 and bottle_wrist_dist > 55.0 and self.moa1_drinking_hold_duration < 0.5:
+                        if abs(bcy - self.moa1_initial_bottle_y) < 25.0 and bottle_wrist_dist > 55.0 and self.moa1_drinking_hold_duration < 1.0:
                             self._trigger_alert(
                                 step_id="S06",
-                                severity="caution",
+                                severity="critical",
                                 kind="skipped",
-                                message="Step S06 skipped: Water bottle returned to table without drinking.",
-                                tts="Caution: Drink water before returning the bottle.",
+                                message="Step S06 skipped! Water bottle returned to table without drinking (hold >= 1.5s required).",
+                                tts="Warning: Step skipped. Drink water from the bottle before returning it.",
                                 t=current_time,
                             )
+                            active_step.status = "skipped"
                     if (current_time - self.moa1_last_drinking_seen_time) > 1.6:
                         self.moa1_drinking_hold_start = None
                         self.moa1_drinking_hold_duration = max(0.0, self.moa1_drinking_hold_duration - dt * 0.2)
@@ -1771,6 +1856,17 @@ class YoloExperimentTracker:
             # S07: Return Bottle to Table & Release Hands
             # -----------------------------------------------------------------
             elif active_step.id == "S07":
+                # Out-of-order check: if astronaut drinks again or holds bottle to mouth
+                if is_drinking:
+                    self._trigger_alert(
+                        step_id="S07",
+                        severity="critical",
+                        kind="out_of_order",
+                        message="Out of order! Step S07 requires returning bottle to table and releasing hands.",
+                        tts="Warning: Step out of order. Return bottle to table and release hands.",
+                        t=current_time,
+                    )
+
                 hands_released = (bottle_wrist_dist >= 65.0)
                 is_on_table = True
                 if bottle_box is not None and self.moa1_initial_bottle_y is not None:
